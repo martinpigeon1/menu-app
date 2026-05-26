@@ -32,7 +32,7 @@ export default function OnboardingForm({ userId }: OnboardingFormProps) {
       .single()
 
     if (householdError || !household) {
-      setError('Erreur lors de la création du foyer.')
+      setError(`Erreur lors de la création du foyer : ${householdError?.message ?? 'réponse vide'}`)
       setLoading(false)
       return
     }
@@ -47,7 +47,7 @@ export default function OnboardingForm({ userId }: OnboardingFormProps) {
       })
 
     if (memberError) {
-      setError('Erreur lors de la configuration du foyer.')
+      setError(`Erreur lors de la configuration du foyer : ${memberError.message}`)
       setLoading(false)
       return
     }
