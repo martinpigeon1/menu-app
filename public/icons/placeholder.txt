@@ -1,0 +1,6 @@
+Remplacer ce dossier par de vraies icônes PNG :
+- icon-192.png (192x192 px)
+- icon-512.png (512x512 px)
+
+Outil recommandé : https://realfavicongenerator.net
+Couleur principale de l'application : #16a34a (vert)
