@@ -33,6 +33,7 @@ function parseLigne(ligne: string): string[] {
 interface RecetteImport {
   household_id: string
   name: string
+  author: string | null
   type: RecipeType
   source: RecipeSource | null
   source_book: string | null
@@ -77,10 +78,12 @@ function parseTSV(text: string, householdId: string): { recettes: RecetteImport[
     const name = get(cols, idx.nom)
     if (!name) continue  // ignorer les lignes sans nom
 
-    // "Auteur" → source_book (nom du livre/appli/auteur)
-    // "Lien"  → source_url si URL, sinon source_book (si Auteur vide)
+    // "Auteur" → author (toujours, quelle que soit la valeur de Lien)
+    // "Lien"  → source_url si URL, sinon source_book
     const auteur = get(cols, idx.auteur)
     const lien   = get(cols, idx.lien)
+
+    const author: string | null = auteur || null
 
     let source_url: string | null = null
     let source_book: string | null = null
@@ -88,12 +91,11 @@ function parseTSV(text: string, householdId: string): { recettes: RecetteImport[
     if (lien.startsWith('http')) {
       source_url = lien
     } else if (lien) {
-      // Lien non-URL : traité comme nom de livre/source
       source_book = lien
     }
 
-    // Auteur prioritaire sur Lien non-URL pour source_book
-    if (auteur) source_book = auteur
+    // Si pas de source_book depuis Lien, utiliser Auteur comme nom de source
+    if (!source_book && auteur) source_book = auteur
 
     const source = deriveSource(source_url, source_book)
 
@@ -118,6 +120,7 @@ function parseTSV(text: string, householdId: string): { recettes: RecetteImport[
     recettes.push({
       household_id: householdId,
       name,
+      author,
       type,
       source,
       source_book,

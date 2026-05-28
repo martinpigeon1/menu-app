@@ -7,6 +7,7 @@ export interface Recipe {
   id: string
   household_id: string
   name: string
+  author: string | null
   source: RecipeSource | null
   source_url: string | null
   source_book: string | null
