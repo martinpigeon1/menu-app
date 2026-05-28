@@ -52,5 +52,5 @@ export default async function HomePage() {
     console.error('Erreur chargement recettes:', error)
   }
 
-  return <RecipesList recipes={recipes ?? []} householdId={householdMember.household_id} />
+  return <RecipesList recipes={recipes ?? []} />
 }
