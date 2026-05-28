@@ -42,3 +42,44 @@ export interface HouseholdMember {
   user_id: string
   role: 'admin' | 'member'
 }
+
+export interface MealPlan {
+  id: string
+  household_id: string
+  week_start: string // 'YYYY-MM-DD'
+  created_at: string
+}
+
+export interface MealPlanRecipe {
+  id: string
+  meal_plan_id: string
+  recipe_id: string
+  servings: number
+  day_of_week: number | null // 0=Mon … 6=Sun
+  meal_type: 'lunch' | 'dinner'
+  sort_order: number
+}
+
+export interface MealPlanRecipeWithDetails extends MealPlanRecipe {
+  recipe: Recipe & { ingredients: Ingredient[] }
+}
+
+export interface MealPlanWithRecipes extends MealPlan {
+  meal_plan_recipes: MealPlanRecipeWithDetails[]
+}
+
+export interface ShoppingItem {
+  name: string
+  quantity: number | null
+  unit: string | null
+}
+
+export interface ShoppingCategory {
+  category: string
+  ingredients: ShoppingItem[]
+}
+
+export interface ShoppingList {
+  categories: ShoppingCategory[]
+  missing_recipes: string[]
+}

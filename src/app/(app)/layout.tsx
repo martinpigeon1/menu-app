@@ -1,7 +1,7 @@
-// Layout principal de l'application (routes protégées)
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import LogoutButton from './LogoutButton'
+import BottomNav from '@/components/ui/BottomNav'
 
 export default async function AppLayout({
   children,
@@ -33,10 +33,11 @@ export default async function AppLayout({
         </div>
       </header>
 
-      {/* Contenu principal */}
-      <main className="max-w-2xl mx-auto px-4 py-6">
+      <main className="max-w-2xl mx-auto px-4 py-6 pb-28">
         {children}
       </main>
+
+      <BottomNav />
     </div>
   )
 }
