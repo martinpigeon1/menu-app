@@ -35,7 +35,7 @@ export default async function HomePage() {
               Commence par créer ton foyer pour gérer tes recettes.
             </p>
           </div>
-          <OnboardingForm userId={user.id} />
+          <OnboardingForm />
         </div>
       </div>
     )

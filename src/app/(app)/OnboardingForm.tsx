@@ -3,13 +3,8 @@
 // Formulaire de création du foyer lors du premier accès
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 
-interface OnboardingFormProps {
-  userId: string
-}
-
-export default function OnboardingForm({ userId }: OnboardingFormProps) {
+export default function OnboardingForm() {
   const router = useRouter()
   const [householdName, setHouseholdName] = useState('')
   const [loading, setLoading] = useState(false)
@@ -22,32 +17,18 @@ export default function OnboardingForm({ userId }: OnboardingFormProps) {
     setLoading(true)
     setError(null)
 
-    const supabase = createClient()
+    // Passer par l'API route (session lue côté serveur depuis les cookies)
+    // pour garantir que auth.uid() est disponible lors de l'évaluation des politiques RLS.
+    const response = await fetch('/api/households', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: householdName.trim() }),
+    })
 
-    // Créer le household
-    const { data: household, error: householdError } = await supabase
-      .from('households')
-      .insert({ name: householdName.trim() })
-      .select()
-      .single()
+    const result = await response.json()
 
-    if (householdError || !household) {
-      setError(`Erreur lors de la création du foyer : ${householdError?.message ?? 'réponse vide'}`)
-      setLoading(false)
-      return
-    }
-
-    // Ajouter l'utilisateur comme admin
-    const { error: memberError } = await supabase
-      .from('household_members')
-      .insert({
-        household_id: household.id,
-        user_id: userId,
-        role: 'admin',
-      })
-
-    if (memberError) {
-      setError(`Erreur lors de la configuration du foyer : ${memberError.message}`)
+    if (!response.ok) {
+      setError(`Erreur lors de la création du foyer : ${result.error}`)
       setLoading(false)
       return
     }
