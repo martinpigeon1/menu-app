@@ -25,9 +25,10 @@ interface PreviewRow {
 interface RecipesListProps {
   recipes: Recipe[]
   authors: string[]
+  ingredientCounts: Record<string, number>
 }
 
-export default function RecipesList({ recipes, authors }: RecipesListProps) {
+export default function RecipesList({ recipes, authors, ingredientCounts }: RecipesListProps) {
   const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -300,7 +301,7 @@ export default function RecipesList({ recipes, authors }: RecipesListProps) {
       ) : (
         <div className="space-y-3">
           {filtered.map((recipe) => (
-            <RecipeCard key={recipe.id} recipe={recipe} />
+            <RecipeCard key={recipe.id} recipe={recipe} ingredientCount={ingredientCounts[recipe.id] ?? 0} />
           ))}
         </div>
       )}

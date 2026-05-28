@@ -44,12 +44,13 @@ L'application sera disponible sur [http://localhost:3000](http://localhost:3000)
 NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
 SUPABASE_SERVICE_ROLE_KEY=eyJ...
+ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 ## Déploiement sur Vercel
 
 1. Connecter le dépôt GitHub à Vercel
-2. Ajouter les trois variables d'environnement dans les paramètres du projet
+2. Ajouter les quatre variables d'environnement dans les paramètres du projet
 3. Déployer (Vercel détecte automatiquement Next.js)
 
 ## Import de recettes (TSV)

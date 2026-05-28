@@ -1,4 +1,3 @@
-// Carte de recette pour la liste des recettes
 import Link from 'next/link'
 import { Recipe } from '@/types/database'
 import Badge from './Badge'
@@ -6,6 +5,7 @@ import StarRating from './StarRating'
 
 interface RecipeCardProps {
   recipe: Recipe
+  ingredientCount?: number
 }
 
 const sourceLabels: Record<string, string> = {
@@ -14,7 +14,7 @@ const sourceLabels: Record<string, string> = {
   autre: 'Autre',
 }
 
-export default function RecipeCard({ recipe }: RecipeCardProps) {
+export default function RecipeCard({ recipe, ingredientCount = 0 }: RecipeCardProps) {
   return (
     <Link
       href={`/recettes/${recipe.id}`}
@@ -22,7 +22,14 @@ export default function RecipeCard({ recipe }: RecipeCardProps) {
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-gray-900 truncate">{recipe.name}</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-gray-900 truncate">{recipe.name}</h3>
+            {ingredientCount > 0 && (
+              <span className="shrink-0 text-xs bg-green-50 text-green-600 border border-green-200 rounded-full px-1.5 py-0.5 leading-none">
+                {ingredientCount} ing.
+              </span>
+            )}
+          </div>
           {recipe.author && (
             <p className="text-xs text-gray-400 truncate mt-0.5">{recipe.author}</p>
           )}

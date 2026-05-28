@@ -16,8 +16,19 @@ export interface Recipe {
   rating: number | null
   prep_time_minutes: number | null
   notes: string | null
+  default_servings: number
   created_at: string
   updated_at: string
+}
+
+export interface Ingredient {
+  id: string
+  recipe_id: string
+  name: string
+  quantity: number | null
+  unit: string | null
+  sort_order: number
+  created_at: string
 }
 
 export interface Household {

@@ -52,10 +52,23 @@ export default async function HomePage() {
     console.error('Erreur chargement recettes:', error)
   }
 
+  // Compter les ingrédients par recette
+  const recipeIds = (recipes ?? []).map((r) => r.id)
+  const ingredientCounts: Record<string, number> = {}
+  if (recipeIds.length > 0) {
+    const { data: ingRows } = await supabase
+      .from('ingredients')
+      .select('recipe_id')
+      .in('recipe_id', recipeIds)
+    for (const row of ingRows ?? []) {
+      ingredientCounts[row.recipe_id] = (ingredientCounts[row.recipe_id] ?? 0) + 1
+    }
+  }
+
   // Valeurs d'auteur distinctes, triées, dérivées des recettes déjà chargées
   const authors = [...new Set(
     (recipes ?? []).map((r) => r.author).filter((a): a is string => !!a)
   )].sort((a, b) => a.localeCompare(b, 'fr'))
 
-  return <RecipesList recipes={recipes ?? []} authors={authors} />
+  return <RecipesList recipes={recipes ?? []} authors={authors} ingredientCounts={ingredientCounts} />
 }
