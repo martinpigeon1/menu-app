@@ -23,6 +23,9 @@ export default function RecipeCard({ recipe }: RecipeCardProps) {
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <h3 className="font-semibold text-gray-900 truncate">{recipe.name}</h3>
+          {recipe.author && (
+            <p className="text-xs text-gray-400 truncate mt-0.5">{recipe.author}</p>
+          )}
 
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
             <Badge type={recipe.type} />

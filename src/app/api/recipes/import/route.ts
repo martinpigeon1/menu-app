@@ -44,7 +44,9 @@ interface RecetteImport {
   notes: string | null
 }
 
-function parseTSV(text: string, householdId: string): { recettes: RecetteImport[]; erreurs: string[] } {
+function parseTSV(rawText: string, householdId: string): { recettes: RecetteImport[]; erreurs: string[] } {
+  // Supprimer le BOM UTF-8 éventuel (présent dans les exports Excel)
+  const text = rawText.startsWith('﻿') ? rawText.slice(1) : rawText
   const lignes = text.split('\n').map((l) => l.trimEnd()).filter(Boolean)
   if (lignes.length < 2) return { recettes: [], erreurs: ['Fichier vide ou sans données'] }
 

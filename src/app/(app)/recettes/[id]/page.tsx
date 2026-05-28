@@ -24,6 +24,7 @@ export default function RecipeDetailPage() {
 
   // Champs d'édition
   const [editName, setEditName] = useState('')
+  const [editAuthor, setEditAuthor] = useState('')
   const [editType, setEditType] = useState<RecipeType>('Plat')
   const [editSource, setEditSource] = useState<RecipeSource | ''>('')
   const [editSourceBook, setEditSourceBook] = useState('')
@@ -56,6 +57,7 @@ export default function RecipeDetailPage() {
 
   function populateEditFields(r: Recipe) {
     setEditName(r.name)
+    setEditAuthor(r.author ?? '')
     setEditType(r.type)
     setEditSource(r.source ?? '')
     setEditSourceBook(r.source_book ?? '')
@@ -83,6 +85,7 @@ export default function RecipeDetailPage() {
       .from('recipes')
       .update({
         name: editName.trim(),
+        author: editAuthor.trim() || null,
         type: editType,
         source: editSource || null,
         source_book: editSourceBook.trim() || null,
@@ -158,6 +161,9 @@ export default function RecipeDetailPage() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-xl font-bold text-gray-900">{recipe.name}</h2>
+                {recipe.author && (
+                  <p className="text-sm text-gray-500 mt-0.5">{recipe.author}</p>
+                )}
                 <div className="flex items-center gap-2 mt-2 flex-wrap">
                   <Badge type={recipe.type} />
                   {recipe.source && (
@@ -220,6 +226,17 @@ export default function RecipeDetailPage() {
                 type="text"
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Auteur</label>
+              <input
+                type="text"
+                value={editAuthor}
+                onChange={(e) => setEditAuthor(e.target.value)}
+                placeholder="Cookidoo, Claire au Matcha…"
                 className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
               />
             </div>

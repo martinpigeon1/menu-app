@@ -16,6 +16,7 @@ export default function NouvelleRecettePage() {
   const [error, setError] = useState<string | null>(null)
 
   const [name, setName] = useState('')
+  const [author, setAuthor] = useState('')
   const [type, setType] = useState<RecipeType>('Plat')
   const [source, setSource] = useState<RecipeSource | ''>('')
   const [sourceBook, setSourceBook] = useState('')
@@ -52,6 +53,7 @@ export default function NouvelleRecettePage() {
     const { error: insertError } = await supabase.from('recipes').insert({
       household_id: member.household_id,
       name: name.trim(),
+      author: author.trim() || null,
       type,
       source: source || null,
       source_book: sourceBook.trim() || null,
@@ -92,6 +94,18 @@ export default function NouvelleRecettePage() {
             onChange={(e) => setName(e.target.value)}
             required
             placeholder="Ratatouille, Tarte aux pommes…"
+            className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+          />
+        </div>
+
+        {/* Auteur */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Auteur</label>
+          <input
+            type="text"
+            value={author}
+            onChange={(e) => setAuthor(e.target.value)}
+            placeholder="Cookidoo, Claire au Matcha…"
             className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
           />
         </div>
