@@ -4,19 +4,12 @@
 import { useState, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Recipe, RecipeType, RecipeSource } from '@/types/database'
+import { Recipe, RecipeType } from '@/types/database'
 import RecipeCard from '@/components/ui/RecipeCard'
 
 const RECIPE_TYPES: RecipeType[] = ['Plat', 'Salade', 'Soupe', 'Entrée', 'Accompagnement', 'Dessert']
-const RECIPE_SOURCES: RecipeSource[] = ['livre', 'site', 'autre']
 
-const sourceLabels: Record<RecipeSource, string> = {
-  livre: 'Livre',
-  site: 'Site web',
-  autre: 'Autre',
-}
-
-type SortKey = 'name' | 'rating' | 'date'
+type SortKey = 'name' | 'rating' | 'author'
 
 type ImportStep = 'idle' | 'loading' | 'preview' | 'importing' | 'done'
 
@@ -31,16 +24,16 @@ interface PreviewRow {
 
 interface RecipesListProps {
   recipes: Recipe[]
+  authors: string[]
 }
 
-export default function RecipesList({ recipes }: RecipesListProps) {
-  // householdId is resolved server-side in the import API route via the user's session
+export default function RecipesList({ recipes, authors }: RecipesListProps) {
   const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [search, setSearch] = useState('')
   const [filterType, setFilterType] = useState<RecipeType | ''>('')
-  const [filterSource, setFilterSource] = useState<RecipeSource | ''>('')
+  const [filterAuthor, setFilterAuthor] = useState('')
   const [minRating, setMinRating] = useState(0)
   const [sortBy, setSortBy] = useState<SortKey>('name')
 
@@ -55,12 +48,18 @@ export default function RecipesList({ recipes }: RecipesListProps) {
   const filtered = recipes
     .filter((r) => search === '' || r.name.toLowerCase().includes(search.toLowerCase()))
     .filter((r) => filterType === '' || r.type === filterType)
-    .filter((r) => filterSource === '' || r.source === filterSource)
+    .filter((r) => filterAuthor === '' || r.author === filterAuthor)
     .filter((r) => minRating === 0 || (r.rating !== null && r.rating >= minRating))
     .sort((a, b) => {
       if (sortBy === 'name') return a.name.localeCompare(b.name, 'fr')
-      if (sortBy === 'rating') return (b.rating ?? 0) - (a.rating ?? 0)
-      if (sortBy === 'date') return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      if (sortBy === 'author') return (a.author ?? '').localeCompare(b.author ?? '', 'fr')
+      if (sortBy === 'rating') {
+        // Nulls last
+        if (a.rating === null && b.rating === null) return 0
+        if (a.rating === null) return 1
+        if (b.rating === null) return -1
+        return b.rating - a.rating
+      }
       return 0
     })
 
@@ -255,13 +254,13 @@ export default function RecipesList({ recipes }: RecipesListProps) {
         </select>
 
         <select
-          value={filterSource}
-          onChange={(e) => setFilterSource(e.target.value as RecipeSource | '')}
+          value={filterAuthor}
+          onChange={(e) => setFilterAuthor(e.target.value)}
           className="flex-1 min-w-[120px] px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
         >
-          <option value="">Toutes sources</option>
-          {RECIPE_SOURCES.map((source) => (
-            <option key={source} value={source}>{sourceLabels[source]}</option>
+          <option value="">Tous les auteurs</option>
+          {authors.map((a) => (
+            <option key={a} value={a}>{a}</option>
           ))}
         </select>
 
@@ -282,8 +281,8 @@ export default function RecipesList({ recipes }: RecipesListProps) {
           className="flex-1 min-w-[110px] px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
         >
           <option value="name">Nom A→Z</option>
-          <option value="rating">Meilleure note</option>
-          <option value="date">Plus récent</option>
+          <option value="rating">Note ↓</option>
+          <option value="author">Auteur A→Z</option>
         </select>
       </div>
 

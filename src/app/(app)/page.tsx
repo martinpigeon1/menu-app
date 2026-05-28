@@ -52,5 +52,10 @@ export default async function HomePage() {
     console.error('Erreur chargement recettes:', error)
   }
 
-  return <RecipesList recipes={recipes ?? []} />
+  // Valeurs d'auteur distinctes, triées, dérivées des recettes déjà chargées
+  const authors = [...new Set(
+    (recipes ?? []).map((r) => r.author).filter((a): a is string => !!a)
+  )].sort((a, b) => a.localeCompare(b, 'fr'))
+
+  return <RecipesList recipes={recipes ?? []} authors={authors} />
 }
