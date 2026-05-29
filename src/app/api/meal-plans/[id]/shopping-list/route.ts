@@ -20,6 +20,11 @@ function adminClient() {
 
 const CATEGORIES = ['Fruits & Légumes', 'Poissons & Fruits de mer', 'Viandes', 'Produits laitiers', 'Épicerie sèche', 'Surgélés', 'Autre'] as const
 
+const PERIOD_DAYS: Record<string, number[]> = {
+  week:    [0, 1, 2, 3, 4], // Mon–Fri
+  weekend: [5, 6],           // Sat–Sun
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -46,10 +51,15 @@ export async function GET(
     .single()
   if (!plan) return NextResponse.json({ error: 'Plan introuvable' }, { status: 404 })
 
+  const period = request.nextUrl.searchParams.get('period') ?? 'week'
+  const allowedDays = PERIOD_DAYS[period] ?? PERIOD_DAYS.week
+
+  // Only include recipes assigned to the requested period's days (null excluded)
   const { data: mprs } = await admin
     .from('meal_plan_recipes')
     .select(`*, recipe:recipe_id(name, default_servings, ingredients(*))`)
     .eq('meal_plan_id', planId)
+    .in('day_of_week', allowedDays)
 
   if (!mprs || mprs.length === 0) {
     return NextResponse.json({ categories: [], missing_recipes: [] })
@@ -60,7 +70,11 @@ export async function GET(
   const missing_recipes: string[] = []
 
   for (const mpr of mprs) {
-    const recipe = mpr.recipe as { name: string; default_servings: number; ingredients: { name: string; quantity: number | null; unit: string | null }[] }
+    const recipe = mpr.recipe as {
+      name: string
+      default_servings: number
+      ingredients: { name: string; quantity: number | null; unit: string | null }[]
+    }
     const ingredients = recipe?.ingredients ?? []
 
     if (ingredients.length === 0) {
@@ -90,7 +104,6 @@ export async function GET(
     return NextResponse.json({ categories: [], missing_recipes })
   }
 
-  // Claude categorization
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
   let categories: { category: string; ingredients: { name: string; quantity: number | null; unit: string | null }[] }[] = []
@@ -108,11 +121,8 @@ Conserve exactement les valeurs quantity et unit fournies. Regroupe les ingrédi
 
     const text = msg.content[0].type === 'text' ? msg.content[0].text : '[]'
     const jsonMatch = text.match(/\[[\s\S]*\]/)
-    if (jsonMatch) {
-      categories = JSON.parse(jsonMatch[0])
-    }
+    if (jsonMatch) categories = JSON.parse(jsonMatch[0])
   } catch {
-    // Fallback: put everything in Autre
     categories = [{ category: 'Autre', ingredients: aggregated }]
   }
 

@@ -135,16 +135,29 @@ export default function PlannerClient() {
           <p className="text-sm mt-1">Ajoutez-en avec le bouton + ci-dessous</p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {recipes.map((mpr) => (
-            <MealPlanCard
-              key={mpr.id}
-              mpr={mpr}
-              onRemove={() => removeRecipe(mpr.id)}
-              onServingsChange={(delta) => changeServings(mpr.id, delta)}
-              onDayChange={(day) => assignDay(mpr.id, day)}
-            />
-          ))}
+        <div className="space-y-5">
+          <RecipeSection
+            title="Semaine · Lun → Ven"
+            items={recipes.filter((m) => m.day_of_week !== null && m.day_of_week <= 4)}
+            onRemove={removeRecipe}
+            onServingsChange={changeServings}
+            onDayChange={assignDay}
+          />
+          <RecipeSection
+            title="Week-end · Sam → Dim"
+            items={recipes.filter((m) => m.day_of_week !== null && m.day_of_week >= 5)}
+            onRemove={removeRecipe}
+            onServingsChange={changeServings}
+            onDayChange={assignDay}
+          />
+          <RecipeSection
+            title="Sans jour assigné"
+            items={recipes.filter((m) => m.day_of_week === null)}
+            onRemove={removeRecipe}
+            onServingsChange={changeServings}
+            onDayChange={assignDay}
+            warn
+          />
         </div>
       )}
 
@@ -208,6 +221,9 @@ function MealPlanCard({ mpr, onRemove, onServingsChange, onDayChange }: MealPlan
           {recipe.author && (
             <p className="text-xs text-gray-400 mt-0.5 truncate">{recipe.author}</p>
           )}
+          {mpr.day_of_week === null && (
+            <p className="text-xs text-amber-600 mt-0.5">⚠️ Assignez un jour pour inclure cette recette dans la liste de courses</p>
+          )}
           {ingCount === 0 && (
             <p className="text-xs text-amber-600 mt-0.5">⚠️ Pas d&apos;ingrédients</p>
           )}
@@ -260,6 +276,39 @@ function MealPlanCard({ mpr, onRemove, onServingsChange, onDayChange }: MealPlan
             </button>
           )
         })}
+      </div>
+    </div>
+  )
+}
+
+interface RecipeSectionProps {
+  title: string
+  items: MealPlanRecipeWithDetails[]
+  onRemove: (id: string) => void
+  onServingsChange: (id: string, delta: number) => void
+  onDayChange: (id: string, day: number | null) => void
+  warn?: boolean
+}
+
+function RecipeSection({ title, items, onRemove, onServingsChange, onDayChange, warn }: RecipeSectionProps) {
+  if (items.length === 0) return null
+  return (
+    <div>
+      <div className={`flex items-center gap-2 mb-2 ${warn ? 'text-amber-600' : 'text-gray-500'}`}>
+        <div className={`flex-1 h-px ${warn ? 'bg-amber-200' : 'bg-gray-200'}`} />
+        <span className="text-xs font-semibold uppercase tracking-wide whitespace-nowrap">{title}</span>
+        <div className={`flex-1 h-px ${warn ? 'bg-amber-200' : 'bg-gray-200'}`} />
+      </div>
+      <div className="space-y-3">
+        {items.map((mpr) => (
+          <MealPlanCard
+            key={mpr.id}
+            mpr={mpr}
+            onRemove={() => onRemove(mpr.id)}
+            onServingsChange={(delta) => onServingsChange(mpr.id, delta)}
+            onDayChange={(day) => onDayChange(mpr.id, day)}
+          />
+        ))}
       </div>
     </div>
   )
