@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Recipe, RecipeType } from '@/types/database'
 import RecipeCard from '@/components/ui/RecipeCard'
+import BatchIngredientImport from '@/components/ui/BatchIngredientImport'
 
 const RECIPE_TYPES: RecipeType[] = ['Plat', 'Salade', 'Soupe', 'Entrée', 'Accompagnement', 'Dessert']
 
@@ -37,6 +38,8 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
   const [filterAuthor, setFilterAuthor] = useState('')
   const [minRating, setMinRating] = useState(0)
   const [sortBy, setSortBy] = useState<SortKey>('name')
+
+  const [showBatchImport, setShowBatchImport] = useState(false)
 
   // Import state
   const [importStep, setImportStep] = useState<ImportStep>('idle')
@@ -146,6 +149,13 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
         </h2>
         <div className="flex gap-2">
           <button
+            onClick={() => setShowBatchImport((v) => !v)}
+            className="text-sm px-3 py-1.5 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
+            title="Importer les ingrédients automatiquement depuis les URLs"
+          >
+            🔄 Auto
+          </button>
+          <button
             onClick={() => { resetImport(); fileInputRef.current?.click() }}
             disabled={importStep === 'loading' || importStep === 'importing'}
             className="text-sm px-3 py-1.5 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
@@ -167,6 +177,15 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
           </Link>
         </div>
       </div>
+
+      {/* Import automatique d'ingrédients */}
+      {showBatchImport && (
+        <BatchIngredientImport
+          recipes={recipes}
+          ingredientCounts={ingredientCounts}
+          onClose={() => setShowBatchImport(false)}
+        />
+      )}
 
       {/* Aperçu avant import */}
       {importStep === 'preview' && (
