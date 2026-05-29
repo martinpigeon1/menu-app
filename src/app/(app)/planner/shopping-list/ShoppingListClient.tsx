@@ -23,6 +23,8 @@ const TAB_LABELS: Record<Period, string> = {
   weekend: '🗓 Week-end (Sam–Dim)',
 }
 
+const PLACARD_CATEGORY = 'Placard'
+
 function itemKey(name: string, unit: string | null) {
   return `${name.toLowerCase().trim()}__${(unit ?? '').toLowerCase()}`
 }
@@ -52,7 +54,7 @@ export default function ShoppingListClient() {
   const weekKey = toDateString(weekStart)
 
   const [planId, setPlanId] = useState<string | null>(null)
-  const [unassigned, setUnassigned] = useState<string[]>([])   // recipe names with no day
+  const [unassigned, setUnassigned] = useState<string[]>([])
   const [loadingPlan, setLoadingPlan] = useState(true)
   const [planError, setPlanError] = useState<string | null>(null)
 
@@ -61,20 +63,26 @@ export default function ShoppingListClient() {
     week: EMPTY_PERIOD,
     weekend: EMPTY_PERIOD,
   })
-  // checked state is loaded lazily from localStorage when needed
+
+  // Placard: shared across both tabs
+  const [placardItems, setPlacardItems] = useState<ShoppingCategory['ingredients']>([])
+  const [placardLoading, setPlacardLoading] = useState(false)
+  const [placardOpen, setPlacardOpen] = useState(false)
+
   const [checked, setChecked] = useState<Record<Period, Set<string>>>({
     week: new Set(),
     weekend: new Set(),
   })
+  const [placardChecked, setPlacardChecked] = useState<Set<string>>(new Set())
 
-  const storageKey = useCallback((p: Period) => `shopping-checked-${weekKey}-${p}`, [weekKey])
+  const storageKey = useCallback((p: Period | 'placard') => `shopping-checked-${weekKey}-${p}`, [weekKey])
 
-  // Load localStorage on mount
   useEffect(() => {
     setChecked({
       week: loadChecked(storageKey('week')),
       weekend: loadChecked(storageKey('weekend')),
     })
+    setPlacardChecked(loadChecked(storageKey('placard')))
   }, [storageKey])
 
   const fetchPeriod = useCallback(async (id: string, period: Period) => {
@@ -83,9 +91,13 @@ export default function ShoppingListClient() {
       const res = await fetch(`/api/meal-plans/${id}/shopping-list?period=${period}`)
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
+      // Strip Placard from period responses — it's shown separately via period=all
+      const filteredCategories = (data.categories ?? []).filter(
+        (c: ShoppingCategory) => c.category !== PLACARD_CATEGORY
+      )
       setPeriodData((prev) => ({
         ...prev,
-        [period]: { categories: data.categories ?? [], missing_recipes: data.missing_recipes ?? [], loaded: true, loading: false, error: null },
+        [period]: { categories: filteredCategories, missing_recipes: data.missing_recipes ?? [], loaded: true, loading: false, error: null },
       }))
     } catch (e) {
       setPeriodData((prev) => ({
@@ -95,7 +107,21 @@ export default function ShoppingListClient() {
     }
   }, [])
 
-  // Fetch plan on mount, then auto-fetch 'week' period
+  const fetchPlacard = useCallback(async (id: string) => {
+    setPlacardLoading(true)
+    try {
+      const res = await fetch(`/api/meal-plans/${id}/shopping-list?period=all`)
+      const data = await res.json()
+      if (!res.ok) return
+      const cat = (data.categories ?? []).find((c: ShoppingCategory) => c.category === PLACARD_CATEGORY)
+      setPlacardItems(cat?.ingredients ?? [])
+    } catch {
+      // best-effort
+    } finally {
+      setPlacardLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     async function fetchPlan() {
       setLoadingPlan(true)
@@ -107,8 +133,7 @@ export default function ShoppingListClient() {
         setPlanId(data.id)
         const mprs: MealPlanRecipeWithDetails[] = data.meal_plan_recipes ?? []
         setUnassigned(mprs.filter((m) => m.day_of_week === null).map((m) => m.recipe.name))
-        // Auto-load week period
-        await fetchPeriod(data.id, 'week')
+        await Promise.all([fetchPeriod(data.id, 'week'), fetchPlacard(data.id)])
       } catch (e) {
         setPlanError(e instanceof Error ? e.message : 'Erreur')
       } finally {
@@ -116,9 +141,8 @@ export default function ShoppingListClient() {
       }
     }
     fetchPlan()
-  }, [weekKey, fetchPeriod])
+  }, [weekKey, fetchPeriod, fetchPlacard])
 
-  // Lazy-load weekend data when tab is first activated
   function switchTab(period: Period) {
     setActivePeriod(period)
     if (planId && !periodData[period].loaded && !periodData[period].loading) {
@@ -133,6 +157,16 @@ export default function ShoppingListClient() {
       else next.add(key)
       saveChecked(storageKey(period), next)
       return { ...prev, [period]: next }
+    })
+  }
+
+  function togglePlacardItem(key: string) {
+    setPlacardChecked((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      saveChecked(storageKey('placard'), next)
+      return next
     })
   }
 
@@ -191,7 +225,7 @@ export default function ShoppingListClient() {
             ))}
           </div>
 
-          {/* Unassigned warning — shown on both tabs */}
+          {/* Unassigned warning */}
           {unassigned.length > 0 && (
             <div className="px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
               <p className="font-medium">
@@ -216,7 +250,7 @@ export default function ShoppingListClient() {
             </div>
           ) : (
             <>
-              {/* Recipes with no ingredients in this period */}
+              {/* Recipes with no ingredients */}
               {current.missing_recipes.length > 0 && (
                 <div className="px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
                   <p className="font-medium mb-1">⚠️ Ces recettes n&apos;ont pas d&apos;ingrédients :</p>
@@ -224,7 +258,7 @@ export default function ShoppingListClient() {
                 </div>
               )}
 
-              {totalItems === 0 ? (
+              {totalItems === 0 && placardItems.length === 0 && !placardLoading ? (
                 <div className="text-center py-12 text-gray-400">
                   <p className="font-medium">Aucun ingrédient pour cette période</p>
                   <p className="text-sm mt-1">Assignez des recettes à des jours {activePeriod === 'week' ? 'Lun–Ven' : 'Sam–Dim'} dans le planner.</p>
@@ -232,55 +266,118 @@ export default function ShoppingListClient() {
               ) : (
                 <>
                   {/* Toolbar */}
-                  <div className="flex items-center justify-between print:hidden">
-                    <p className="text-xs text-gray-500">
-                      {currentChecked.size}/{totalItems} article{totalItems > 1 ? 's' : ''} cochés
-                    </p>
-                    <div className="flex items-center gap-3">
-                      {planId && (
+                  {totalItems > 0 && (
+                    <div className="flex items-center justify-between print:hidden">
+                      <p className="text-xs text-gray-500">
+                        {currentChecked.size}/{totalItems} article{totalItems > 1 ? 's' : ''} cochés
+                      </p>
+                      <div className="flex items-center gap-3">
+                        {planId && (
+                          <button
+                            onClick={() => {
+                              fetchPeriod(planId, activePeriod)
+                              fetchPlacard(planId)
+                            }}
+                            className="text-xs text-green-600 hover:text-green-700"
+                          >
+                            ↻ Regénérer
+                          </button>
+                        )}
                         <button
-                          onClick={() => fetchPeriod(planId, activePeriod)}
-                          className="text-xs text-green-600 hover:text-green-700"
+                          onClick={() => uncheckAll(activePeriod)}
+                          className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg"
                         >
-                          ↻ Regénérer
+                          Tout décocher
                         </button>
-                      )}
-                      <button
-                        onClick={() => uncheckAll(activePeriod)}
-                        className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg"
-                      >
-                        Tout décocher
-                      </button>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Categories */}
-                  <div className="space-y-4">
-                    {current.categories.map((cat) => (
-                      <div key={cat.category} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                        <div className="px-4 py-2 bg-gray-50 border-b border-gray-100">
-                          <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">{cat.category}</h3>
+                  {totalItems > 0 && (
+                    <div className="space-y-4">
+                      {current.categories.map((cat) => (
+                        <div key={cat.category} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                          <div className="px-4 py-2 bg-gray-50 border-b border-gray-100">
+                            <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">{cat.category}</h3>
+                          </div>
+                          <ul>
+                            {cat.ingredients.map((ing, idx) => {
+                              const key = itemKey(ing.name, ing.unit)
+                              const isChecked = currentChecked.has(key)
+                              return (
+                                <li
+                                  key={idx}
+                                  onClick={() => toggleItem(activePeriod, key)}
+                                  className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors ${
+                                    idx < cat.ingredients.length - 1 ? 'border-b border-gray-50' : ''
+                                  } ${isChecked ? 'bg-gray-50' : 'hover:bg-gray-50'}`}
+                                >
+                                  <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
+                                    isChecked ? 'bg-green-600 border-green-600' : 'border-gray-300'
+                                  }`}>
+                                    {isChecked && <span className="text-white text-xs font-bold">✓</span>}
+                                  </div>
+                                  <span className={`flex-1 text-sm transition-colors ${isChecked ? 'line-through text-gray-400' : 'text-gray-700'}`}>
+                                    {formatQty(ing.quantity) && (
+                                      <span className="text-gray-500 mr-1">
+                                        {formatQty(ing.quantity)}{ing.unit ? ` ${ing.unit}` : ''}
+                                      </span>
+                                    )}
+                                    {ing.name}
+                                  </span>
+                                </li>
+                              )
+                            })}
+                          </ul>
                         </div>
-                        <ul>
-                          {cat.ingredients.map((ing, idx) => {
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Placard — shared across tabs, collapsed by default, muted styling */}
+                  {(placardItems.length > 0 || placardLoading) && (
+                    <div className="rounded-xl border border-gray-100 overflow-hidden">
+                      <button
+                        onClick={() => setPlacardOpen((v) => !v)}
+                        className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide shrink-0">
+                            🧂 Placard
+                          </span>
+                          {placardLoading ? (
+                            <span className="text-xs text-gray-300">Chargement…</span>
+                          ) : (
+                            <span className="text-xs text-gray-400 truncate">
+                              {placardItems.length} ingrédient{placardItems.length > 1 ? 's' : ''} · à vérifier si nécessaire
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-gray-300 text-xs ml-2 shrink-0">{placardOpen ? '▲' : '▼'}</span>
+                      </button>
+
+                      {placardOpen && !placardLoading && (
+                        <ul className="bg-white">
+                          {placardItems.map((ing, idx) => {
                             const key = itemKey(ing.name, ing.unit)
-                            const isChecked = currentChecked.has(key)
+                            const isChecked = placardChecked.has(key)
                             return (
                               <li
                                 key={idx}
-                                onClick={() => toggleItem(activePeriod, key)}
+                                onClick={() => togglePlacardItem(key)}
                                 className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors ${
-                                  idx < cat.ingredients.length - 1 ? 'border-b border-gray-50' : ''
+                                  idx < placardItems.length - 1 ? 'border-b border-gray-50' : ''
                                 } ${isChecked ? 'bg-gray-50' : 'hover:bg-gray-50'}`}
                               >
                                 <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
-                                  isChecked ? 'bg-green-600 border-green-600' : 'border-gray-300'
+                                  isChecked ? 'bg-gray-300 border-gray-300' : 'border-gray-200'
                                 }`}>
                                   {isChecked && <span className="text-white text-xs font-bold">✓</span>}
                                 </div>
-                                <span className={`flex-1 text-sm transition-colors ${isChecked ? 'line-through text-gray-400' : 'text-gray-700'}`}>
+                                <span className={`flex-1 text-sm transition-colors ${isChecked ? 'line-through text-gray-300' : 'text-gray-400'}`}>
                                   {formatQty(ing.quantity) && (
-                                    <span className="text-gray-500 mr-1">
+                                    <span className="mr-1">
                                       {formatQty(ing.quantity)}{ing.unit ? ` ${ing.unit}` : ''}
                                     </span>
                                   )}
@@ -290,9 +387,9 @@ export default function ShoppingListClient() {
                             )
                           })}
                         </ul>
-                      </div>
-                    ))}
-                  </div>
+                      )}
+                    </div>
+                  )}
                 </>
               )}
             </>

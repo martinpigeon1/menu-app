@@ -8,6 +8,7 @@ import { Recipe, RecipeType, RecipeSource, Ingredient } from '@/types/database'
 import Badge from '@/components/ui/Badge'
 import StarRating from '@/components/ui/StarRating'
 import IngredientImportModal, { ExtractedIngredient } from '@/components/ui/IngredientImportModal'
+import AddToPlannerSheet from '@/components/ui/AddToPlannerSheet'
 
 const TYPES: RecipeType[] = ['Plat', 'Salade', 'Soupe', 'Entrée', 'Accompagnement', 'Dessert']
 
@@ -23,6 +24,8 @@ export default function RecipeDetailPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showImportModal, setShowImportModal] = useState(false)
+  const [showPlannerSheet, setShowPlannerSheet] = useState(false)
+  const [plannerToast, setPlannerToast] = useState(false)
 
   // Edit fields
   const [editName, setEditName] = useState('')
@@ -161,6 +164,13 @@ export default function RecipeDetailPage() {
         <div className="flex items-center justify-between">
           <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm">← Retour</Link>
           <div className="flex gap-2">
+            <button
+              onClick={() => setShowPlannerSheet(true)}
+              title="Ajouter au planning"
+              className="text-sm text-gray-600 hover:text-green-600 font-medium px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-green-50 transition-colors"
+            >
+              📅
+            </button>
             {!editing && (
               <button
                 onClick={() => setEditing(true)}
@@ -413,6 +423,26 @@ export default function RecipeDetailPage() {
           onSaved={handleIngredientsSaved}
           onClose={() => setShowImportModal(false)}
         />
+      )}
+
+      {showPlannerSheet && (
+        <AddToPlannerSheet
+          recipe={recipe}
+          onClose={() => setShowPlannerSheet(false)}
+          onAdded={() => {
+            setShowPlannerSheet(false)
+            setPlannerToast(true)
+            setTimeout(() => setPlannerToast(false), 2500)
+          }}
+        />
+      )}
+
+      {plannerToast && (
+        <div className="fixed bottom-24 inset-x-0 flex justify-center z-50 pointer-events-none">
+          <div className="bg-gray-900 text-white text-sm font-medium px-4 py-2.5 rounded-xl shadow-lg">
+            ✅ Ajouté au planning
+          </div>
+        </div>
       )}
     </>
   )

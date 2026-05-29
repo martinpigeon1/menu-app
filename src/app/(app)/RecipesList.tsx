@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { Recipe, RecipeType } from '@/types/database'
 import RecipeCard from '@/components/ui/RecipeCard'
 import BatchIngredientImport from '@/components/ui/BatchIngredientImport'
+import AddToPlannerSheet from '@/components/ui/AddToPlannerSheet'
 
 const RECIPE_TYPES: RecipeType[] = ['Plat', 'Salade', 'Soupe', 'Entrée', 'Accompagnement', 'Dessert']
 
@@ -40,6 +41,8 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
   const [sortBy, setSortBy] = useState<SortKey>('name')
 
   const [showBatchImport, setShowBatchImport] = useState(false)
+  const [plannerRecipe, setPlannerRecipe] = useState<Recipe | null>(null)
+  const [plannerToast, setPlannerToast] = useState(false)
 
   // Import state
   const [importStep, setImportStep] = useState<ImportStep>('idle')
@@ -320,9 +323,36 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
       ) : (
         <div className="space-y-3">
           {filtered.map((recipe) => (
-            <RecipeCard key={recipe.id} recipe={recipe} ingredientCount={ingredientCounts[recipe.id] ?? 0} />
+            <RecipeCard
+              key={recipe.id}
+              recipe={recipe}
+              ingredientCount={ingredientCounts[recipe.id] ?? 0}
+              onAddToPlanner={() => setPlannerRecipe(recipe)}
+            />
           ))}
         </div>
+      )}
+
+      {/* Toast */}
+      {plannerToast && (
+        <div className="fixed bottom-24 inset-x-0 flex justify-center z-50 pointer-events-none">
+          <div className="bg-gray-900 text-white text-sm font-medium px-4 py-2.5 rounded-xl shadow-lg">
+            ✅ Ajouté au planning
+          </div>
+        </div>
+      )}
+
+      {/* Add to planner sheet */}
+      {plannerRecipe && (
+        <AddToPlannerSheet
+          recipe={plannerRecipe}
+          onClose={() => setPlannerRecipe(null)}
+          onAdded={() => {
+            setPlannerRecipe(null)
+            setPlannerToast(true)
+            setTimeout(() => setPlannerToast(false), 2500)
+          }}
+        />
       )}
     </div>
   )

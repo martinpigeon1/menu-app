@@ -18,7 +18,16 @@ function adminClient() {
   )
 }
 
-const CATEGORIES = ['Fruits & Légumes', 'Poissons & Fruits de mer', 'Viandes', 'Produits laitiers', 'Épicerie sèche', 'Surgélés', 'Autre'] as const
+const CATEGORIES = [
+  'Fruits & Légumes',
+  'Poissons & Fruits de mer',
+  'Viandes',
+  'Produits laitiers & Œufs',
+  'Épicerie (conserves / pâtes / riz…)',
+  'Surgélés',
+  'Placard',
+  'Autre',
+] as const
 
 const PERIOD_DAYS: Record<string, number[]> = {
   week:    [0, 1, 2, 3, 4], // Mon–Fri
@@ -52,14 +61,23 @@ export async function GET(
   if (!plan) return NextResponse.json({ error: 'Plan introuvable' }, { status: 404 })
 
   const period = request.nextUrl.searchParams.get('period') ?? 'week'
-  const allowedDays = PERIOD_DAYS[period] ?? PERIOD_DAYS.week
+  const allowedDays = PERIOD_DAYS[period]
 
-  // Only include recipes assigned to the requested period's days (null excluded)
-  const { data: mprs } = await admin
+  // For 'all' period: fetch every recipe with a day assigned (both week + weekend)
+  // Used to compute the shared Placard category
+  let mprQuery = admin
     .from('meal_plan_recipes')
     .select(`*, recipe:recipe_id(name, default_servings, ingredients(*))`)
     .eq('meal_plan_id', planId)
-    .in('day_of_week', allowedDays)
+
+  if (period === 'all') {
+    // All days that are set (null excluded automatically by .in)
+    mprQuery = mprQuery.in('day_of_week', [0, 1, 2, 3, 4, 5, 6])
+  } else if (allowedDays) {
+    mprQuery = mprQuery.in('day_of_week', allowedDays)
+  }
+
+  const { data: mprs } = await mprQuery
 
   if (!mprs || mprs.length === 0) {
     return NextResponse.json({ categories: [], missing_recipes: [] })
@@ -113,6 +131,17 @@ export async function GET(
       model: 'claude-opus-4-7',
       max_tokens: 2048,
       system: `Categorise ces ingrédients dans ces catégories exactes: ${CATEGORIES.join(', ')}.
+
+Règles de catégorisation :
+- "Fruits & Légumes" : fruits frais, légumes frais, herbes fraîches
+- "Poissons & Fruits de mer" : tous les poissons et fruits de mer (frais ou en boîte)
+- "Viandes" : viandes et volailles
+- "Produits laitiers & Œufs" : lait, yaourts, fromages, crème, beurre, œufs
+- "Épicerie (conserves / pâtes / riz…)" : conserves, pâtes, riz, légumineuses, farine, sucre, céréales, sauces en bouteille
+- "Surgélés" : produits surgelés
+- "Placard" : condiments et aromates qui se gardent longtemps en cuisine (sel, poivre, huile, vinaigre, épices, moutarde, sauce soja, concentré de tomate, bouillon en cube, ail en poudre, etc.) — ce sont des ingrédients qu'on a généralement déjà dans son placard et qu'on n'achète que si nécessaire
+- "Autre" : tout ce qui ne rentre pas dans les catégories précédentes
+
 Retourne UNIQUEMENT du JSON valide, sans markdown, sans explication:
 [{ "category": string, "ingredients": [{ "name": string, "quantity": number|null, "unit": string|null }] }]
 Conserve exactement les valeurs quantity et unit fournies. Regroupe les ingrédients similaires si possible.`,
