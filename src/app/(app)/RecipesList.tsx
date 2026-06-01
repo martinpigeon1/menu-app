@@ -1,17 +1,17 @@
 'use client'
 
-// Composant client pour la liste filtrée/triée des recettes
 import { useState, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Recipe, RecipeType } from '@/types/database'
-import RecipeCard from '@/components/ui/RecipeCard'
+import Badge from '@/components/ui/Badge'
 import BatchIngredientImport from '@/components/ui/BatchIngredientImport'
 import AddToPlannerSheet from '@/components/ui/AddToPlannerSheet'
 
 const RECIPE_TYPES: RecipeType[] = ['Plat', 'Salade', 'Soupe', 'Entrée', 'Accompagnement', 'Dessert']
 
-type SortKey = 'name' | 'rating' | 'author'
+type SortKey = 'name' | 'rating' | 'author' | 'prep_time'
+type SortDir = 'asc' | 'desc'
 
 type ImportStep = 'idle' | 'loading' | 'preview' | 'importing' | 'done'
 
@@ -30,6 +30,13 @@ interface RecipesListProps {
   ingredientCounts: Record<string, number>
 }
 
+const DEFAULT_DIR: Record<SortKey, SortDir> = {
+  name: 'asc',
+  author: 'asc',
+  rating: 'desc',
+  prep_time: 'asc',
+}
+
 export default function RecipesList({ recipes, authors, ingredientCounts }: RecipesListProps) {
   const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -39,59 +46,75 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
   const [filterAuthor, setFilterAuthor] = useState('')
   const [minRating, setMinRating] = useState(0)
   const [sortBy, setSortBy] = useState<SortKey>('name')
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
 
   const [showBatchImport, setShowBatchImport] = useState(false)
   const [plannerRecipe, setPlannerRecipe] = useState<Recipe | null>(null)
   const [plannerToast, setPlannerToast] = useState(false)
 
-  // Import state
   const [importStep, setImportStep] = useState<ImportStep>('idle')
   const [importFile, setImportFile] = useState<File | null>(null)
   const [previewRows, setPreviewRows] = useState<PreviewRow[]>([])
   const [previewTotal, setPreviewTotal] = useState(0)
   const [importMessage, setImportMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
-  // Filtrage et tri en mémoire
   const filtered = recipes
     .filter((r) => search === '' || r.name.toLowerCase().includes(search.toLowerCase()))
     .filter((r) => filterType === '' || r.type === filterType)
     .filter((r) => filterAuthor === '' || r.author === filterAuthor)
     .filter((r) => minRating === 0 || (r.rating !== null && r.rating >= minRating))
     .sort((a, b) => {
-      if (sortBy === 'name') return a.name.localeCompare(b.name, 'fr')
-      if (sortBy === 'author') return (a.author ?? '').localeCompare(b.author ?? '', 'fr')
-      if (sortBy === 'rating') {
-        // Nulls last
-        if (a.rating === null && b.rating === null) return 0
-        if (a.rating === null) return 1
-        if (b.rating === null) return -1
-        return b.rating - a.rating
+      let cmp = 0
+      if (sortBy === 'name') {
+        cmp = a.name.localeCompare(b.name, 'fr')
+      } else if (sortBy === 'author') {
+        cmp = (a.author ?? '').localeCompare(b.author ?? '', 'fr')
+      } else if (sortBy === 'rating') {
+        if (a.rating === null && b.rating === null) cmp = 0
+        else if (a.rating === null) cmp = 1
+        else if (b.rating === null) cmp = -1
+        else cmp = a.rating - b.rating
+      } else if (sortBy === 'prep_time') {
+        if (a.prep_time_minutes === null && b.prep_time_minutes === null) cmp = 0
+        else if (a.prep_time_minutes === null) cmp = 1
+        else if (b.prep_time_minutes === null) cmp = -1
+        else cmp = a.prep_time_minutes - b.prep_time_minutes
       }
-      return 0
+      return sortDir === 'asc' ? cmp : -cmp
     })
 
-  // Étape 1 : sélection du fichier → aperçu
+  const isFiltered = search !== '' || filterType !== '' || filterAuthor !== '' || minRating !== 0
+
+  function handleSort(key: SortKey) {
+    if (sortBy === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortBy(key)
+      setSortDir(DEFAULT_DIR[key])
+    }
+  }
+
+  function SortArrow({ k }: { k: SortKey }) {
+    if (sortBy !== k) return <span className="text-gray-300 ml-0.5 text-[10px]">↕</span>
+    return <span className="ml-0.5 text-green-600">{sortDir === 'asc' ? '↑' : '↓'}</span>
+  }
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-
     setImportFile(file)
     setImportStep('loading')
     setImportMessage(null)
-
     const formData = new FormData()
     formData.append('file', file)
-
     try {
       const res = await fetch('/api/recipes/import?preview=true', { method: 'POST', body: formData })
       const data = await res.json()
-
       if (!res.ok) {
         setImportMessage({ type: 'error', text: data.error ?? 'Erreur lors de la lecture du fichier' })
         setImportStep('idle')
         return
       }
-
       setPreviewRows(data.preview)
       setPreviewTotal(data.total)
       setImportStep('preview')
@@ -103,19 +126,14 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
     }
   }
 
-  // Étape 2 : confirmation → import effectif
   const handleConfirmImport = async () => {
     if (!importFile) return
-
     setImportStep('importing')
-
     const formData = new FormData()
     formData.append('file', importFile)
-
     try {
       const res = await fetch('/api/recipes/import', { method: 'POST', body: formData })
       const data = await res.json()
-
       if (!res.ok) {
         setImportMessage({ type: 'error', text: data.error ?? 'Import échoué' })
       } else {
@@ -125,7 +143,7 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
         router.refresh()
       }
     } catch {
-      setImportMessage({ type: 'error', text: 'Erreur réseau lors de l\'import.' })
+      setImportMessage({ type: 'error', text: "Erreur réseau lors de l'import." })
     } finally {
       setImportStep('done')
       setImportFile(null)
@@ -141,15 +159,10 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
   }
 
   return (
-    <div className="space-y-4">
-      {/* En-tête */}
+    <div className="space-y-3">
+      {/* Header */}
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold text-gray-800">
-          Mes recettes
-          {recipes.length > 0 && (
-            <span className="ml-2 text-sm font-normal text-gray-500">({recipes.length})</span>
-          )}
-        </h2>
+        <h2 className="text-lg font-semibold text-gray-800">Mes recettes</h2>
         <div className="flex gap-2">
           <button
             onClick={() => setShowBatchImport((v) => !v)}
@@ -163,40 +176,25 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
             disabled={importStep === 'loading' || importStep === 'importing'}
             className="text-sm px-3 py-1.5 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
           >
-            {importStep === 'loading' ? 'Lecture...' : importStep === 'importing' ? 'Import...' : 'Importer TSV'}
+            {importStep === 'loading' ? 'Lecture...' : importStep === 'importing' ? 'Import...' : 'TSV'}
           </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".tsv,.txt,.csv"
-            className="hidden"
-            onChange={handleFileChange}
-          />
-          <Link
-            href="/recettes/nouvelle"
-            className="text-sm px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
-          >
+          <input ref={fileInputRef} type="file" accept=".tsv,.txt,.csv" className="hidden" onChange={handleFileChange} />
+          <Link href="/recettes/nouvelle" className="text-sm px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium">
             + Ajouter
           </Link>
         </div>
       </div>
 
-      {/* Import automatique d'ingrédients */}
+      {/* Batch import */}
       {showBatchImport && (
-        <BatchIngredientImport
-          recipes={recipes}
-          ingredientCounts={ingredientCounts}
-          onClose={() => setShowBatchImport(false)}
-        />
+        <BatchIngredientImport recipes={recipes} ingredientCounts={ingredientCounts} onClose={() => setShowBatchImport(false)} />
       )}
 
-      {/* Aperçu avant import */}
+      {/* TSV preview */}
       {importStep === 'preview' && (
         <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
           <div>
-            <p className="text-sm font-medium text-gray-800">
-              Aperçu — {previewTotal} recette(s) détectée(s)
-            </p>
+            <p className="text-sm font-medium text-gray-800">Aperçu — {previewTotal} recette(s) détectée(s)</p>
             <p className="text-xs text-gray-500 mt-0.5">3 premières lignes :</p>
           </div>
           <div className="overflow-x-auto">
@@ -215,9 +213,7 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
                   <tr key={i} className="border-b border-gray-50">
                     <td className="py-1 pr-3 font-medium text-gray-800 max-w-[140px] truncate">{row.name}</td>
                     <td className="py-1 pr-3 text-gray-600">{row.type}</td>
-                    <td className="py-1 pr-3 text-gray-600 max-w-[100px] truncate">
-                      {row.source_book ?? row.source_url ?? '—'}
-                    </td>
+                    <td className="py-1 pr-3 text-gray-600 max-w-[100px] truncate">{row.source_book ?? row.source_url ?? '—'}</td>
                     <td className="py-1 pr-3 text-gray-600">{row.rating != null ? `${row.rating}/5` : '—'}</td>
                     <td className="py-1 text-gray-600">{row.prep_time_minutes != null ? `${row.prep_time_minutes} min` : '—'}</td>
                   </tr>
@@ -226,90 +222,67 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
             </table>
           </div>
           <div className="flex gap-2 pt-1">
-            <button
-              onClick={handleConfirmImport}
-              className="flex-1 bg-green-600 text-white text-sm py-2 rounded-lg hover:bg-green-700 transition-colors font-medium"
-            >
+            <button onClick={handleConfirmImport} className="flex-1 bg-green-600 text-white text-sm py-2 rounded-lg hover:bg-green-700 transition-colors font-medium">
               Importer {previewTotal} recette{previewTotal > 1 ? 's' : ''}
             </button>
-            <button
-              onClick={resetImport}
-              className="px-4 text-sm py-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
-            >
+            <button onClick={resetImport} className="px-4 text-sm py-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">
               Annuler
             </button>
           </div>
         </div>
       )}
 
-      {/* Message résultat */}
+      {/* Import message */}
       {importMessage && (
-        <div className={`px-4 py-3 rounded-lg text-sm border ${
-          importMessage.type === 'error'
-            ? 'bg-red-50 border-red-200 text-red-700'
-            : 'bg-green-50 border-green-200 text-green-700'
-        }`}>
+        <div className={`px-4 py-3 rounded-lg text-sm border ${importMessage.type === 'error' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-700'}`}>
           {importMessage.text}
           <button onClick={() => setImportMessage(null)} className="ml-2 underline">Fermer</button>
         </div>
       )}
 
-      {/* Recherche */}
-      <input
-        type="search"
-        placeholder="Rechercher une recette..."
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
-      />
-
-      {/* Filtres */}
-      <div className="flex gap-2 flex-wrap">
+      {/* Compact filters */}
+      <div className="flex gap-1.5 flex-wrap">
+        <input
+          type="search"
+          placeholder="Rechercher…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="flex-1 min-w-[140px] h-8 px-2.5 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
+        />
         <select
           value={filterType}
           onChange={(e) => setFilterType(e.target.value as RecipeType | '')}
-          className="flex-1 min-w-[120px] px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
+          className="h-8 px-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
         >
-          <option value="">Tous les types</option>
-          {RECIPE_TYPES.map((type) => (
-            <option key={type} value={type}>{type}</option>
-          ))}
+          <option value="">Tous types</option>
+          {RECIPE_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
         </select>
-
         <select
           value={filterAuthor}
           onChange={(e) => setFilterAuthor(e.target.value)}
-          className="flex-1 min-w-[120px] px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
+          className="h-8 px-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
         >
-          <option value="">Tous les auteurs</option>
-          {authors.map((a) => (
-            <option key={a} value={a}>{a}</option>
-          ))}
+          <option value="">Tous auteurs</option>
+          {authors.map((a) => <option key={a} value={a}>{a}</option>)}
         </select>
-
         <select
           value={minRating}
           onChange={(e) => setMinRating(Number(e.target.value))}
-          className="flex-1 min-w-[110px] px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
+          className="h-8 px-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
         >
           <option value={0}>Toutes notes</option>
-          {[1, 2, 3, 4, 5].map((r) => (
-            <option key={r} value={r}>{'★'.repeat(r)} min</option>
-          ))}
-        </select>
-
-        <select
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as SortKey)}
-          className="flex-1 min-w-[110px] px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
-        >
-          <option value="name">Nom A→Z</option>
-          <option value="rating">Note ↓</option>
-          <option value="author">Auteur A→Z</option>
+          {[1, 2, 3, 4, 5].map((r) => <option key={r} value={r}>{'★'.repeat(r)}+</option>)}
         </select>
       </div>
 
-      {/* Liste */}
+      {/* Row count */}
+      <p className="text-xs text-gray-400">
+        {isFiltered
+          ? `${filtered.length} résultat${filtered.length > 1 ? 's' : ''}`
+          : `${recipes.length} recette${recipes.length !== 1 ? 's' : ''}`}
+      </p>
+
+      {/* Table */}
       {recipes.length === 0 ? (
         <div className="text-center py-16 text-gray-400">
           <div className="text-5xl mb-3">🍽️</div>
@@ -321,15 +294,106 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
           <p>Aucune recette ne correspond aux filtres.</p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {filtered.map((recipe) => (
-            <RecipeCard
-              key={recipe.id}
-              recipe={recipe}
-              ingredientCount={ingredientCounts[recipe.id] ?? 0}
-              onAddToPlanner={() => setPlannerRecipe(recipe)}
-            />
-          ))}
+        // overflow: clip clips the border-radius without creating a scroll container,
+        // so position:sticky on thead works relative to the page scroll.
+        <div className="rounded-xl border border-gray-200" style={{ overflow: 'clip' }}>
+          <table className="w-full text-sm border-collapse">
+            <thead className="sticky top-0 z-10 bg-white border-b border-gray-200 shadow-[0_1px_0_0_#e5e7eb]">
+              <tr>
+                <th
+                  onClick={() => handleSort('name')}
+                  className="px-3 py-2 text-left text-xs font-semibold text-gray-500 cursor-pointer select-none hover:text-gray-800 transition-colors"
+                >
+                  Nom <SortArrow k="name" />
+                </th>
+                <th
+                  onClick={() => handleSort('author')}
+                  className="hidden sm:table-cell px-3 py-2 text-left text-xs font-semibold text-gray-500 cursor-pointer select-none hover:text-gray-800 transition-colors"
+                >
+                  Auteur <SortArrow k="author" />
+                </th>
+                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Type</th>
+                <th
+                  onClick={() => handleSort('rating')}
+                  className="px-3 py-2 text-left text-xs font-semibold text-gray-500 cursor-pointer select-none hover:text-gray-800 transition-colors"
+                >
+                  Note <SortArrow k="rating" />
+                </th>
+                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Ing.</th>
+                <th
+                  onClick={() => handleSort('prep_time')}
+                  className="hidden sm:table-cell px-3 py-2 text-left text-xs font-semibold text-gray-500 cursor-pointer select-none hover:text-gray-800 transition-colors"
+                >
+                  Temps <SortArrow k="prep_time" />
+                </th>
+                <th className="hidden sm:table-cell px-3 py-2 text-left text-xs font-semibold text-gray-500">Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((recipe, i) => {
+                const ingCount = ingredientCounts[recipe.id] ?? 0
+                return (
+                  <tr
+                    key={recipe.id}
+                    onClick={() => router.push(`/recettes/${recipe.id}`)}
+                    className={`cursor-pointer hover:bg-green-50 transition-colors ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'}`}
+                  >
+                    {/* Nom */}
+                    <td className="px-3 py-2.5 font-medium text-gray-900 max-w-[160px] sm:max-w-[220px]">
+                      <span className="block truncate">{recipe.name}</span>
+                    </td>
+
+                    {/* Auteur — desktop only */}
+                    <td className="hidden sm:table-cell px-3 py-2.5 text-xs text-gray-500 max-w-[120px]">
+                      <span className="block truncate">{recipe.author ?? '—'}</span>
+                    </td>
+
+                    {/* Type */}
+                    <td className="px-3 py-2.5 whitespace-nowrap">
+                      <Badge type={recipe.type} />
+                    </td>
+
+                    {/* Note */}
+                    <td className="px-3 py-2.5 whitespace-nowrap text-xs">
+                      {recipe.rating != null && recipe.rating > 0
+                        ? <span><span className="text-amber-400">★</span><span className="text-gray-700 ml-0.5">{recipe.rating}</span></span>
+                        : <span className="text-gray-300">—</span>
+                      }
+                    </td>
+
+                    {/* Ingrédients + 📅 */}
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs whitespace-nowrap">
+                          {ingCount > 0
+                            ? <span className="text-gray-700">✅ {ingCount}</span>
+                            : <span className="text-amber-500">⚠️</span>
+                          }
+                        </span>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setPlannerRecipe(recipe) }}
+                          title="Ajouter au planning"
+                          className="text-gray-300 hover:text-green-600 transition-colors leading-none"
+                        >
+                          📅
+                        </button>
+                      </div>
+                    </td>
+
+                    {/* Temps — desktop only */}
+                    <td className="hidden sm:table-cell px-3 py-2.5 text-xs text-gray-500 whitespace-nowrap">
+                      {recipe.prep_time_minutes ? `${recipe.prep_time_minutes} min` : '—'}
+                    </td>
+
+                    {/* Notes — desktop only */}
+                    <td className="hidden sm:table-cell px-3 py-2.5 text-xs text-gray-400 max-w-[200px]">
+                      <span className="block truncate">{recipe.notes ?? ''}</span>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 
