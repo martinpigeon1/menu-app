@@ -83,3 +83,56 @@ export interface ShoppingList {
   categories: ShoppingCategory[]
   missing_recipes: string[]
 }
+
+// --- Picnic integration (Phase 4) ---
+
+export interface PicnicCredentials {
+  household_id: string
+  email: string | null
+  auth_key: string
+  created_at: string
+  updated_at: string
+}
+
+export interface PicnicIngredientMapping {
+  id: string
+  household_id: string
+  ingredient_name: string
+  picnic_product_id: string
+  picnic_product_name: string
+  picnic_product_image_url: string | null
+  remembered: boolean
+  last_used_at: string
+}
+
+// A Picnic product as surfaced to the client (never includes auth data)
+export interface PicnicProduct {
+  product_id: string
+  product_name: string
+  image_url: string | null
+  price: number | null // in euros
+  unit_quantity: string | null
+}
+
+export type MatchConfidence = 'high' | 'medium' | 'low'
+
+export interface PicnicReviewItem {
+  ingredient: ShoppingItem
+  suggested_product: PicnicProduct | null
+  quantity_to_add: number
+  confidence: MatchConfidence
+  has_previous_mapping: boolean
+}
+
+export interface PicnicAutoItem {
+  ingredient: ShoppingItem
+  product: PicnicProduct
+  quantity_to_add: number
+  remembered: true
+}
+
+export interface PicnicMatchResult {
+  to_review: PicnicReviewItem[]
+  auto_added: PicnicAutoItem[]
+  not_found: { ingredient: ShoppingItem }[]
+}

@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import LogoutButton from './LogoutButton'
 import BottomNav from '@/components/ui/BottomNav'
@@ -28,6 +29,13 @@ export default async function AppLayout({
             <span className="text-xs text-gray-500 hidden sm:block truncate max-w-[150px]">
               {user.email}
             </span>
+            <Link
+              href="/settings"
+              aria-label="Paramètres"
+              className="text-lg text-gray-400 hover:text-gray-600 transition-colors leading-none"
+            >
+              ⚙️
+            </Link>
             <LogoutButton />
           </div>
         </div>

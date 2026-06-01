@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
-import { ShoppingCategory, MealPlanRecipeWithDetails } from '@/types/database'
+import { ShoppingCategory, ShoppingItem, MealPlanRecipeWithDetails } from '@/types/database'
 import { getMondayOf, toDateString, fromDateString, formatWeekRange } from '@/lib/weeks'
+import PicnicReviewModal from '@/components/ui/PicnicReviewModal'
 
 type Period = 'week' | 'weekend'
 
@@ -74,6 +75,19 @@ export default function ShoppingListClient() {
     weekend: new Set(),
   })
   const [placardChecked, setPlacardChecked] = useState<Set<string>>(new Set())
+
+  // Picnic
+  const [picnicConnected, setPicnicConnected] = useState<boolean | null>(null)
+  const [showPicnicModal, setShowPicnicModal] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/picnic/status')
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setPicnicConnected(!!d.connected) })
+      .catch(() => { if (!cancelled) setPicnicConnected(false) })
+    return () => { cancelled = true }
+  }, [])
 
   const storageKey = useCallback((p: Period | 'placard') => `shopping-checked-${weekKey}-${p}`, [weekKey])
 
@@ -180,6 +194,13 @@ export default function ShoppingListClient() {
   const current = periodData[activePeriod]
   const currentChecked = checked[activePeriod]
   const totalItems = current.categories.reduce((s, c) => s + c.ingredients.length, 0)
+
+  // Items sent to Picnic: non-Placard (already filtered out of categories) and
+  // not checked off (a checked item means the user already has it). Placard
+  // staples are never ordered.
+  const sendableItems: ShoppingItem[] = current.categories
+    .flatMap((c) => c.ingredients)
+    .filter((ing) => !currentChecked.has(itemKey(ing.name, ing.unit)))
 
   return (
     <div className="space-y-4 print:space-y-4">
@@ -293,6 +314,34 @@ export default function ShoppingListClient() {
                     </div>
                   )}
 
+                  {/* Send to Picnic */}
+                  {totalItems > 0 && (
+                    <div className="print:hidden">
+                      <button
+                        onClick={() => setShowPicnicModal(true)}
+                        disabled={!picnicConnected || sendableItems.length === 0}
+                        title={
+                          !picnicConnected
+                            ? 'Connectez Picnic dans les paramètres'
+                            : sendableItems.length === 0
+                            ? 'Aucun article à envoyer (tout est coché)'
+                            : undefined
+                        }
+                        className="w-full flex items-center justify-center gap-2 bg-green-600 text-white py-2.5 rounded-xl text-sm font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        🛒 Envoyer à Picnic
+                        {sendableItems.length > 0 && picnicConnected && (
+                          <span className="text-xs font-normal opacity-90">({sendableItems.length})</span>
+                        )}
+                      </button>
+                      {picnicConnected === false && (
+                        <p className="text-xs text-gray-400 text-center mt-1.5">
+                          <Link href="/settings" className="underline hover:text-gray-600">Connectez Picnic</Link> dans les paramètres pour activer.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   {/* Categories */}
                   {totalItems > 0 && (
                     <div className="space-y-4">
@@ -395,6 +444,15 @@ export default function ShoppingListClient() {
             </>
           )}
         </>
+      )}
+
+      {/* Picnic review modal */}
+      {showPicnicModal && (
+        <PicnicReviewModal
+          ingredients={sendableItems}
+          period={activePeriod}
+          onClose={() => setShowPicnicModal(false)}
+        />
       )}
     </div>
   )
