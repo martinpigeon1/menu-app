@@ -15,6 +15,24 @@ export function addWeeks(date: Date, n: number): Date {
   return d
 }
 
+// Index du jour de la semaine dans notre modèle (0=Lun … 6=Dim) pour une date donnée.
+export function currentDayIndex(date: Date = new Date()): number {
+  const jsDay = date.getDay() // 0=Dim
+  return jsDay === 0 ? 6 : jsDay - 1
+}
+
+// Un jour est « passé » s'il est strictement avant aujourd'hui dans la semaine en cours
+// (aujourd'hui et les jours à venir ne le sont pas).
+export function isDayInPast(dayIndex: number): boolean {
+  return dayIndex < currentDayIndex()
+}
+
+// Lundi sur lequel le planning doit s'ouvrir par défaut. Le dimanche, la semaine
+// est essentiellement terminée : on bascule automatiquement sur la semaine prochaine.
+export function defaultPlannerMonday(): Date {
+  return currentDayIndex() === 6 ? addWeeks(getMondayOf(), 1) : getMondayOf()
+}
+
 export function toDateString(date: Date): string {
   const y = date.getFullYear()
   const m = String(date.getMonth() + 1).padStart(2, '0')

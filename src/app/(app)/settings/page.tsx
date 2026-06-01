@@ -17,6 +17,10 @@ export default function SettingsPage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // 2FA step (shown inline after login reports requires_2fa)
+  const [twoFAStep, setTwoFAStep] = useState(false)
+  const [code, setCode] = useState('')
+
   async function fetchStatus() {
     setLoading(true)
     try {
@@ -46,6 +50,10 @@ export default function SettingsPage() {
       const data = await res.json()
       if (!res.ok) {
         setError(data.error ?? 'Connexion échouée')
+      } else if (data.requires_2fa) {
+        // Keep email & password in state — needed to complete /verify-2fa.
+        setTwoFAStep(true)
+        setCode('')
       } else {
         setPassword('')
         setEmail('')
@@ -56,6 +64,41 @@ export default function SettingsPage() {
     } finally {
       setSubmitting(false)
     }
+  }
+
+  async function handleVerify2FA(e: React.FormEvent) {
+    e.preventDefault()
+    if (code.trim().length < 4) return
+    setSubmitting(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/picnic/verify-2fa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password, code: code.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.error ?? 'Code incorrect, réessayez')
+      } else {
+        setPassword('')
+        setEmail('')
+        setCode('')
+        setTwoFAStep(false)
+        await fetchStatus()
+      }
+    } catch {
+      setError('Erreur réseau.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  function cancelTwoFA() {
+    setTwoFAStep(false)
+    setCode('')
+    setPassword('')
+    setError(null)
   }
 
   async function handleDisconnect() {
@@ -107,6 +150,46 @@ export default function SettingsPage() {
               Vous pouvez maintenant envoyer votre liste de courses directement vers votre panier Picnic.
             </p>
           </div>
+        ) : twoFAStep ? (
+          <form onSubmit={handleVerify2FA} className="space-y-3">
+            <p className="text-sm text-gray-700 font-medium">
+              📱 Un code SMS a été envoyé à votre téléphone Picnic
+            </p>
+            <p className="text-xs text-gray-500">
+              Saisissez le code reçu pour finaliser la connexion.
+            </p>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Code de vérification</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+                maxLength={6}
+                placeholder="000000"
+                autoFocus
+                className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm tracking-[0.4em] text-center focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+
+            {error && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
+
+            <button
+              type="submit"
+              disabled={submitting || code.trim().length < 4}
+              className="w-full bg-green-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50 transition-colors"
+            >
+              {submitting ? 'Vérification…' : 'Vérifier'}
+            </button>
+            <button
+              type="button"
+              onClick={cancelTwoFA}
+              className="w-full text-sm text-gray-500 hover:text-gray-700 transition-colors"
+            >
+              ← Annuler
+            </button>
+          </form>
         ) : (
           <form onSubmit={handleConnect} className="space-y-3">
             <p className="text-sm text-gray-600">

@@ -3,17 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { MealPlanWithRecipes, MealPlanRecipeWithDetails } from '@/types/database'
-import { getMondayOf, addWeeks, toDateString, fromDateString, formatWeekRange, dayLabel } from '@/lib/weeks'
+import { getMondayOf, addWeeks, toDateString, fromDateString, formatWeekRange, dayLabel, defaultPlannerMonday, isDayInPast } from '@/lib/weeks'
 import RecipePicker from './RecipePicker'
 
 const DAYS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim']
 
 export default function PlannerClient() {
-  const [weekStart, setWeekStart] = useState<Date>(() => getMondayOf())
+  const [weekStart, setWeekStart] = useState<Date>(() => defaultPlannerMonday())
   const [plan, setPlan] = useState<MealPlanWithRecipes | null>(null)
   const [loading, setLoading] = useState(true)
   const [showPicker, setShowPicker] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [movedToast, setMovedToast] = useState(false)
   // debounce map: mprId → timeout
   const servingsTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
@@ -99,6 +100,32 @@ export default function PlannerClient() {
     })
   }
 
+  // Never plan in the past: picking a past day on the current week moves the
+  // recipe to next week's plan (created on demand) instead of assigning it here.
+  async function moveToNextWeek(mpr: MealPlanRecipeWithDetails, day: number) {
+    if (!plan) return
+    // Optimistically drop it from the current week's view.
+    setPlan((prev) => prev ? { ...prev, meal_plan_recipes: prev.meal_plan_recipes.filter((m) => m.id !== mpr.id) } : prev)
+    try {
+      const nextWeek = toDateString(addWeeks(getMondayOf(), 1))
+      const planRes = await fetch(`/api/meal-plans/current?week=${nextWeek}`)
+      const nextPlan = await planRes.json()
+      if (!planRes.ok) throw new Error(nextPlan.error ?? 'Plan introuvable')
+      const addRes = await fetch(`/api/meal-plans/${nextPlan.id}/recipes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipe_id: mpr.recipe_id, servings: mpr.servings, day_of_week: day }),
+      })
+      if (!addRes.ok) throw new Error('Ajout à la semaine prochaine échoué')
+      await fetch(`/api/meal-plans/${plan.id}/recipes/${mpr.id}`, { method: 'DELETE' })
+      setMovedToast(true)
+      setTimeout(() => setMovedToast(false), 2500)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erreur')
+      fetchPlan(weekStart) // revert optimistic removal
+    }
+  }
+
   const recipes = plan?.meal_plan_recipes ?? []
   const hasRecipes = recipes.length > 0
   const weekParam = toDateString(weekStart)
@@ -142,6 +169,8 @@ export default function PlannerClient() {
             onRemove={removeRecipe}
             onServingsChange={changeServings}
             onDayChange={assignDay}
+            onMoveToNextWeek={moveToNextWeek}
+            currentWeek={isCurrentWeek}
           />
           <RecipeSection
             title="Week-end · Sam → Dim"
@@ -149,6 +178,8 @@ export default function PlannerClient() {
             onRemove={removeRecipe}
             onServingsChange={changeServings}
             onDayChange={assignDay}
+            onMoveToNextWeek={moveToNextWeek}
+            currentWeek={isCurrentWeek}
           />
           <RecipeSection
             title="Sans jour assigné"
@@ -156,6 +187,8 @@ export default function PlannerClient() {
             onRemove={removeRecipe}
             onServingsChange={changeServings}
             onDayChange={assignDay}
+            onMoveToNextWeek={moveToNextWeek}
+            currentWeek={isCurrentWeek}
             warn
           />
         </div>
@@ -191,6 +224,14 @@ export default function PlannerClient() {
           onClose={() => setShowPicker(false)}
         />
       )}
+
+      {movedToast && (
+        <div className="fixed bottom-24 inset-x-0 flex justify-center z-50 pointer-events-none">
+          <div className="bg-gray-900 text-white text-sm font-medium px-4 py-2.5 rounded-xl shadow-lg">
+            ✅ Déplacé à la semaine prochaine
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -200,9 +241,11 @@ interface MealPlanCardProps {
   onRemove: () => void
   onServingsChange: (delta: number) => void
   onDayChange: (day: number | null) => void
+  onMoveToNextWeek: (day: number) => void
+  currentWeek: boolean
 }
 
-function MealPlanCard({ mpr, onRemove, onServingsChange, onDayChange }: MealPlanCardProps) {
+function MealPlanCard({ mpr, onRemove, onServingsChange, onDayChange, onMoveToNextWeek, currentWeek }: MealPlanCardProps) {
   const recipe = mpr.recipe
   const ingCount = recipe.ingredients?.length ?? 0
 
@@ -258,21 +301,26 @@ function MealPlanCard({ mpr, onRemove, onServingsChange, onDayChange }: MealPlan
         </div>
       </div>
 
-      {/* Day selector */}
+      {/* Day selector — past days (current week only) route to next week */}
       <div className="flex gap-1 overflow-x-auto pb-0.5 scrollbar-hide">
         {DAYS.map((label, i) => {
           const active = mpr.day_of_week === i
+          const past = currentWeek && !active && isDayInPast(i)
           return (
             <button
               key={i}
-              onClick={() => onDayChange(active ? null : i)}
-              className={`shrink-0 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+              onClick={() => (past ? onMoveToNextWeek(i) : onDayChange(active ? null : i))}
+              title={past ? 'Jour passé — déplace la recette à la semaine prochaine' : undefined}
+              className={`shrink-0 flex flex-col items-center px-2.5 py-1 rounded-2xl text-xs font-medium border transition-colors ${
                 active
                   ? 'bg-green-600 text-white border-green-600'
+                  : past
+                  ? 'border-dashed border-gray-200 text-gray-400 hover:border-green-300'
                   : 'border-gray-200 text-gray-500 hover:border-green-300'
               }`}
             >
-              {label}
+              <span>{label}</span>
+              {past && <span className="text-[8px] leading-none text-amber-500">→ sem.</span>}
             </button>
           )
         })}
@@ -287,10 +335,12 @@ interface RecipeSectionProps {
   onRemove: (id: string) => void
   onServingsChange: (id: string, delta: number) => void
   onDayChange: (id: string, day: number | null) => void
+  onMoveToNextWeek: (mpr: MealPlanRecipeWithDetails, day: number) => void
+  currentWeek: boolean
   warn?: boolean
 }
 
-function RecipeSection({ title, items, onRemove, onServingsChange, onDayChange, warn }: RecipeSectionProps) {
+function RecipeSection({ title, items, onRemove, onServingsChange, onDayChange, onMoveToNextWeek, currentWeek, warn }: RecipeSectionProps) {
   if (items.length === 0) return null
   return (
     <div>
@@ -307,6 +357,8 @@ function RecipeSection({ title, items, onRemove, onServingsChange, onDayChange, 
             onRemove={() => onRemove(mpr.id)}
             onServingsChange={(delta) => onServingsChange(mpr.id, delta)}
             onDayChange={(day) => onDayChange(mpr.id, day)}
+            onMoveToNextWeek={(day) => onMoveToNextWeek(mpr, day)}
+            currentWeek={currentWeek}
           />
         ))}
       </div>

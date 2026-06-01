@@ -64,21 +64,22 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
     .filter((r) => filterAuthor === '' || r.author === filterAuthor)
     .filter((r) => minRating === 0 || (r.rating !== null && r.rating >= minRating))
     .sort((a, b) => {
+      // Numeric columns: null values always sink to the bottom, regardless of
+      // sort direction (an unrated recipe should never float to the top on Note ↓).
+      if (sortBy === 'rating' || sortBy === 'prep_time') {
+        const av = sortBy === 'rating' ? a.rating : a.prep_time_minutes
+        const bv = sortBy === 'rating' ? b.rating : b.prep_time_minutes
+        if (av === null && bv === null) return 0
+        if (av === null) return 1
+        if (bv === null) return -1
+        const cmp = av - bv
+        return sortDir === 'asc' ? cmp : -cmp
+      }
       let cmp = 0
       if (sortBy === 'name') {
         cmp = a.name.localeCompare(b.name, 'fr')
       } else if (sortBy === 'author') {
         cmp = (a.author ?? '').localeCompare(b.author ?? '', 'fr')
-      } else if (sortBy === 'rating') {
-        if (a.rating === null && b.rating === null) cmp = 0
-        else if (a.rating === null) cmp = 1
-        else if (b.rating === null) cmp = -1
-        else cmp = a.rating - b.rating
-      } else if (sortBy === 'prep_time') {
-        if (a.prep_time_minutes === null && b.prep_time_minutes === null) cmp = 0
-        else if (a.prep_time_minutes === null) cmp = 1
-        else if (b.prep_time_minutes === null) cmp = -1
-        else cmp = a.prep_time_minutes - b.prep_time_minutes
       }
       return sortDir === 'asc' ? cmp : -cmp
     })

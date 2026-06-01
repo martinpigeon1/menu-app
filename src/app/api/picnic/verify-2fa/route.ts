@@ -8,7 +8,7 @@ export async function POST(request: NextRequest) {
   const ctx = await resolveHousehold(request)
   if ('error' in ctx) return NextResponse.json({ error: ctx.error }, { status: ctx.status })
 
-  let body: { email?: string; password?: string }
+  let body: { email?: string; password?: string; code?: string }
   try {
     body = await request.json()
   } catch {
@@ -17,30 +17,27 @@ export async function POST(request: NextRequest) {
 
   const email = body.email?.trim()
   const password = body.password
-  if (!email || !password) {
-    return NextResponse.json({ error: 'Email et mot de passe requis' }, { status: 400 })
+  const code = body.code?.trim()
+  if (!email || !password || !code) {
+    return NextResponse.json({ error: 'Email, mot de passe et code requis' }, { status: 400 })
   }
 
   const client = createPicnicClient()
 
   let authKey: string
   try {
-    const result = await client.auth.login(email, password)
-    if (result.second_factor_authentication_required) {
-      // Trigger the SMS code and ask the client to complete via /verify-2fa.
-      // The auth key is NOT stored at this stage.
-      try {
-        await client.auth.generate2FACode('SMS')
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : 'Erreur'
-        return NextResponse.json({ error: `Envoi du code SMS échoué : ${msg}` }, { status: 502 })
-      }
-      return NextResponse.json({ requires_2fa: true })
-    }
+    // Re-establish the (provisional) session, then verify the SMS code. The
+    // password is never stored — only the resulting auth key is persisted.
+    await client.auth.login(email, password)
+    const result = await client.auth.verify2FACode(code)
     authKey = result.authKey
   } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Échec de la connexion'
-    return NextResponse.json({ error: `Connexion Picnic échouée : ${msg}` }, { status: 401 })
+    const msg = e instanceof Error ? e.message : ''
+    // Picnic returns a generic failure for a bad/expired code.
+    const friendly = /verif|2fa|code|invalid|incorrect/i.test(msg)
+      ? 'Code incorrect, réessayez'
+      : `Vérification échouée : ${msg || 'erreur inconnue'}`
+    return NextResponse.json({ error: friendly }, { status: 401 })
   }
 
   // Upsert credentials (auth_key never returned to the client)

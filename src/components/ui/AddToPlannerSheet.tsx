@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Recipe } from '@/types/database'
-import { getMondayOf, toDateString, dayLabel } from '@/lib/weeks'
+import { getMondayOf, addWeeks, toDateString, dayLabel, isDayInPast, defaultPlannerMonday } from '@/lib/weeks'
 
 const DAYS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim']
 
@@ -18,12 +18,23 @@ export default function AddToPlannerSheet({ recipe, onClose, onAdded }: AddToPla
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Never plan in the past: a past day routes the recipe to next week's plan;
+  // today/future days stay this week; no day picked follows the default (next
+  // week on Sunday, this week otherwise).
+  const goesToNextWeek = selectedDay !== null && isDayInPast(selectedDay)
+
   async function handleAdd() {
     setLoading(true)
     setError(null)
 
     try {
-      const week = toDateString(getMondayOf())
+      const targetMonday =
+        selectedDay === null
+          ? defaultPlannerMonday()
+          : isDayInPast(selectedDay)
+          ? addWeeks(getMondayOf(), 1)
+          : getMondayOf()
+      const week = toDateString(targetMonday)
       const planRes = await fetch(`/api/meal-plans/current?week=${week}`)
       const planData = await planRes.json()
       if (!planRes.ok) throw new Error(planData.error ?? 'Plan introuvable')
@@ -66,21 +77,34 @@ export default function AddToPlannerSheet({ recipe, onClose, onAdded }: AddToPla
           <div className="flex gap-1.5 flex-wrap">
             {DAYS.map((label, i) => {
               const active = selectedDay === i
+              const past = isDayInPast(i)
               return (
                 <button
                   key={i}
                   onClick={() => setSelectedDay(active ? null : i)}
-                  className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
+                  className={`flex flex-col items-center px-3 py-1 rounded-2xl text-sm font-medium border transition-colors ${
                     active
                       ? 'bg-green-600 text-white border-green-600'
+                      : past
+                      ? 'border-dashed border-gray-200 text-gray-400 hover:border-green-300'
                       : 'border-gray-200 text-gray-600 hover:border-green-300'
                   }`}
                 >
-                  {label}
+                  <span>{label}</span>
+                  {past && (
+                    <span className={`text-[9px] leading-tight ${active ? 'text-green-100' : 'text-amber-500'}`}>
+                      → sem. proch.
+                    </span>
+                  )}
                 </button>
               )
             })}
           </div>
+          {goesToNextWeek && (
+            <p className="text-xs text-amber-600">
+              {dayLabel(selectedDay!)} est déjà passé — la recette sera ajoutée à la semaine prochaine.
+            </p>
+          )}
           {selectedDay === null && (
             <p className="text-xs text-amber-600">Sans jour — ne sera pas inclus dans la liste de courses</p>
           )}
@@ -116,7 +140,9 @@ export default function AddToPlannerSheet({ recipe, onClose, onAdded }: AddToPla
           disabled={loading}
           className="w-full bg-green-600 text-white py-3 rounded-xl text-sm font-semibold hover:bg-green-700 disabled:opacity-50 transition-colors"
         >
-          {loading ? 'Ajout…' : `Ajouter au planning${selectedDay !== null ? ` — ${dayLabel(selectedDay)}` : ''}`}
+          {loading
+            ? 'Ajout…'
+            : `Ajouter au planning${selectedDay !== null ? ` — ${dayLabel(selectedDay)}` : ''}${goesToNextWeek ? ' (sem. proch.)' : ''}`}
         </button>
       </div>
     </>
