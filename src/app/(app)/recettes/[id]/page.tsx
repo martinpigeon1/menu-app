@@ -265,21 +265,14 @@ export default function RecipeDetailPage() {
                     >
                       <span>📷</span> Importer depuis photo
                     </button>
-                    {recipe.source_url && !recipe.source_url.includes('cookidoo') ? (
+                    {recipe.source_url && (
                       <button
                         onClick={() => setShowImportModal(true)}
                         className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
                       >
                         <span>🔗</span> Récupérer depuis l&apos;URL
                       </button>
-                    ) : recipe.source_url?.includes('cookidoo') ? (
-                      <span
-                        title="Extraction indisponible pour Cookidoo"
-                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-gray-100 rounded-lg text-gray-400 cursor-not-allowed"
-                      >
-                        <span>🔗</span> URL Cookidoo
-                      </span>
-                    ) : null}
+                    )}
                   </div>
                 ) : (
                   <div>

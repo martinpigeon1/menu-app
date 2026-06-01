@@ -110,13 +110,12 @@ export async function POST(request: NextRequest) {
     .single()
   if (!member) return NextResponse.json({ error: 'Foyer introuvable' }, { status: 403 })
 
-  // Find candidates: public URL, not Cookidoo
+  // Find candidates: any public URL
   const { data: candidates } = await admin
     .from('recipes')
     .select('id, name, source_url, default_servings')
     .eq('household_id', member.household_id)
     .like('source_url', 'http%')
-    .not('source_url', 'like', '%cookidoo%')
 
   if (!candidates || candidates.length === 0) {
     const encoder = new TextEncoder()

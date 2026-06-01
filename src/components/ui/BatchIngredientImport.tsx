@@ -32,7 +32,7 @@ export default function BatchIngredientImport({ recipes, ingredientCounts, onClo
 
   // Client-side eligible count (for preview before starting)
   const eligibleCount = recipes.filter(
-    (r) => r.source_url?.startsWith('http') && !r.source_url.includes('cookidoo') && (ingredientCounts[r.id] ?? 0) === 0
+    (r) => r.source_url?.startsWith('http') && (ingredientCounts[r.id] ?? 0) === 0
   ).length
 
   function updateItem(id: string, patch: Partial<RecipeProgress>) {
