@@ -41,10 +41,12 @@ export default async function HomePage() {
     )
   }
 
-  // Récupérer les recettes du household
-  const { data: recipes, error } = await supabase
+  // Récupérer les recettes du household avec le nombre d'ingrédients par recette.
+  // ingredients(count) utilise l'agrégat PostgREST — pas de limite de 1000 lignes
+  // et pas de requête séparée.
+  const { data: recipesRaw, error } = await supabase
     .from('recipes')
-    .select('*')
+    .select('*, ingredients(count)')
     .eq('household_id', householdMember.household_id)
     .order('name', { ascending: true })
 
@@ -52,18 +54,14 @@ export default async function HomePage() {
     console.error('Erreur chargement recettes:', error)
   }
 
-  // Compter les ingrédients par recette
-  const recipeIds = (recipes ?? []).map((r) => r.id)
   const ingredientCounts: Record<string, number> = {}
-  if (recipeIds.length > 0) {
-    const { data: ingRows } = await supabase
-      .from('ingredients')
-      .select('recipe_id')
-      .in('recipe_id', recipeIds)
-    for (const row of ingRows ?? []) {
-      ingredientCounts[row.recipe_id] = (ingredientCounts[row.recipe_id] ?? 0) + 1
-    }
-  }
+  const recipes = (recipesRaw ?? []).map((row) => {
+    const ingList = row.ingredients as { count: number }[] | null
+    ingredientCounts[row.id] = ingList?.[0]?.count ?? 0
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { ingredients: _ing, ...recipe } = row
+    return recipe
+  })
 
   // Valeurs d'auteur distinctes, triées, dérivées des recettes déjà chargées
   const authors = [...new Set(
