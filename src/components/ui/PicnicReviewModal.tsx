@@ -115,7 +115,10 @@ export default function PicnicReviewModal({ ingredients, period, onClose }: Picn
 
   async function openAlternatives(index: number) {
     setAltIndex(index)
-    const q = reviews[index].ingredient.name
+    const r = reviews[index]
+    // Use the Dutch name for the Picnic search (it was used during matching);
+    // fall back to the French name only if no translation is stored yet.
+    const q = r.dutchName?.trim() || r.ingredient.name
     setAltQuery(q)
     await runAltSearch(q)
   }
