@@ -294,39 +294,51 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
           <p>Aucune recette ne correspond aux filtres.</p>
         </div>
       ) : (
-        // overflow: clip clips the border-radius without creating a scroll container,
-        // so position:sticky on thead works relative to the page scroll.
+        // overflow:clip clips rounded corners without creating a scroll container,
+        // preserving position:sticky on thead relative to the page scroll.
         <div className="rounded-xl border border-gray-200" style={{ overflow: 'clip' }}>
-          <table className="w-full text-sm border-collapse">
+          {/*
+            table-fixed: browser uses <th> widths strictly, no content-driven reflow.
+            Column widths are set on <th> and must sum to 100% at each breakpoint.
+            Mobile  (Auteur hidden): 45+16+10+16+13 = 100%
+            Desktop (Auteur visible): 35+18+14+10+13+10 = 100%
+          */}
+          <table className="w-full table-fixed text-sm">
             <thead className="sticky top-0 z-10 bg-white border-b border-gray-200 shadow-[0_1px_0_0_#e5e7eb]">
               <tr>
+                {/* Nom: 45% mobile → 35% desktop */}
                 <th
                   onClick={() => handleSort('name')}
-                  className="px-3 py-2 text-left text-xs font-semibold text-gray-500 cursor-pointer select-none hover:text-gray-800 transition-colors"
+                  className="w-[45%] sm:w-[35%] px-3 py-2 text-left text-xs font-semibold text-gray-500 cursor-pointer select-none hover:text-gray-800 transition-colors"
                 >
                   Nom <SortArrow k="name" />
                 </th>
+                {/* Auteur: hidden mobile → 18% desktop */}
                 <th
                   onClick={() => handleSort('author')}
-                  className="hidden sm:table-cell px-3 py-2 text-left text-xs font-semibold text-gray-500 cursor-pointer select-none hover:text-gray-800 transition-colors"
+                  className="hidden sm:table-cell sm:w-[18%] px-3 py-2 text-left text-xs font-semibold text-gray-500 cursor-pointer select-none hover:text-gray-800 transition-colors"
                 >
                   Auteur <SortArrow k="author" />
                 </th>
-                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Type</th>
+                {/* Type: 16% mobile → 14% desktop */}
+                <th className="w-[16%] sm:w-[14%] px-3 py-2 text-left text-xs font-semibold text-gray-500">
+                  Type
+                </th>
+                {/* Note: 10% both */}
                 <th
                   onClick={() => handleSort('rating')}
-                  className="px-3 py-2 text-left text-xs font-semibold text-gray-500 cursor-pointer select-none hover:text-gray-800 transition-colors"
+                  className="w-[10%] px-3 py-2 text-left text-xs font-semibold text-gray-500 cursor-pointer select-none hover:text-gray-800 transition-colors"
                 >
                   Note <SortArrow k="rating" />
                 </th>
-                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Ing.</th>
-                <th
-                  onClick={() => handleSort('prep_time')}
-                  className="hidden sm:table-cell px-3 py-2 text-left text-xs font-semibold text-gray-500 cursor-pointer select-none hover:text-gray-800 transition-colors"
-                >
-                  Temps <SortArrow k="prep_time" />
+                {/* Ing: 16% mobile → 13% desktop */}
+                <th className="w-[16%] sm:w-[13%] px-3 py-2 text-left text-xs font-semibold text-gray-500">
+                  Ing.
                 </th>
-                <th className="hidden sm:table-cell px-3 py-2 text-left text-xs font-semibold text-gray-500">Notes</th>
+                {/* Actions: 13% mobile → 10% desktop */}
+                <th className="w-[13%] sm:w-[10%] px-3 py-2 text-left text-xs font-semibold text-gray-500">
+                  {/* empty — icon column */}
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -336,58 +348,48 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
                   <tr
                     key={recipe.id}
                     onClick={() => router.push(`/recettes/${recipe.id}`)}
-                    className={`cursor-pointer hover:bg-green-50 transition-colors ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'}`}
+                    className={`cursor-pointer hover:bg-green-50 transition-colors border-t border-gray-100 ${i === 0 ? 'border-t-0' : ''} ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'}`}
                   >
                     {/* Nom */}
-                    <td className="px-3 py-2.5 font-medium text-gray-900 max-w-[160px] sm:max-w-[220px]">
+                    <td className="px-3 py-2.5 font-medium text-gray-900 overflow-hidden">
                       <span className="block truncate">{recipe.name}</span>
                     </td>
 
                     {/* Auteur — desktop only */}
-                    <td className="hidden sm:table-cell px-3 py-2.5 text-xs text-gray-500 max-w-[120px]">
+                    <td className="hidden sm:table-cell px-3 py-2.5 text-xs text-gray-500 overflow-hidden">
                       <span className="block truncate">{recipe.author ?? '—'}</span>
                     </td>
 
                     {/* Type */}
-                    <td className="px-3 py-2.5 whitespace-nowrap">
-                      <Badge type={recipe.type} />
+                    <td className="px-3 py-2.5 overflow-hidden">
+                      <Badge type={recipe.type} compact />
                     </td>
 
                     {/* Note */}
-                    <td className="px-3 py-2.5 whitespace-nowrap text-xs">
+                    <td className="px-3 py-2.5 text-xs overflow-hidden">
                       {recipe.rating != null && recipe.rating > 0
-                        ? <span><span className="text-amber-400">★</span><span className="text-gray-700 ml-0.5">{recipe.rating}</span></span>
+                        ? <span className="whitespace-nowrap"><span className="text-amber-400">★</span><span className="text-gray-700 ml-0.5">{recipe.rating}</span></span>
                         : <span className="text-gray-300">—</span>
                       }
                     </td>
 
-                    {/* Ingrédients + 📅 */}
-                    <td className="px-3 py-2.5">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs whitespace-nowrap">
-                          {ingCount > 0
-                            ? <span className="text-gray-700">✅ {ingCount}</span>
-                            : <span className="text-amber-500">⚠️</span>
-                          }
-                        </span>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setPlannerRecipe(recipe) }}
-                          title="Ajouter au planning"
-                          className="text-gray-300 hover:text-green-600 transition-colors leading-none"
-                        >
-                          📅
-                        </button>
-                      </div>
+                    {/* Ingrédients */}
+                    <td className="px-3 py-2.5 text-xs overflow-hidden">
+                      {ingCount > 0
+                        ? <span className="text-gray-700 whitespace-nowrap">✅ {ingCount}</span>
+                        : <span className="text-amber-500">⚠️</span>
+                      }
                     </td>
 
-                    {/* Temps — desktop only */}
-                    <td className="hidden sm:table-cell px-3 py-2.5 text-xs text-gray-500 whitespace-nowrap">
-                      {recipe.prep_time_minutes ? `${recipe.prep_time_minutes} min` : '—'}
-                    </td>
-
-                    {/* Notes — desktop only */}
-                    <td className="hidden sm:table-cell px-3 py-2.5 text-xs text-gray-400 max-w-[200px]">
-                      <span className="block truncate">{recipe.notes ?? ''}</span>
+                    {/* Actions: 📅 only, centred, 36×36 touch target */}
+                    <td className="px-1 py-1 text-center overflow-hidden">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setPlannerRecipe(recipe) }}
+                        title="Ajouter au planning"
+                        className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-gray-300 hover:text-green-600 hover:bg-green-50 transition-colors"
+                      >
+                        📅
+                      </button>
                     </td>
                   </tr>
                 )
