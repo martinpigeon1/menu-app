@@ -24,6 +24,7 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
 interface ClaudePick {
+  dutch_name: string
   product_id: string
   product_name: string
   quantity_to_add: number
@@ -39,10 +40,26 @@ function normQuantity(q: unknown): number {
   return Number.isFinite(n) && n >= 1 ? n : 1
 }
 
+async function translateToNL(anthropic: Anthropic, frenchName: string): Promise<string> {
+  try {
+    const msg = await anthropic.messages.create({
+      model: 'claude-haiku-4-5',
+      max_tokens: 32,
+      system: "Traduis ce nom d'ingrédient culinaire du français vers le néerlandais. Réponds uniquement avec la traduction, sans explication.",
+      messages: [{ role: 'user', content: frenchName }],
+    })
+    const text = msg.content[0]?.type === 'text' ? msg.content[0].text.trim() : ''
+    return text || frenchName
+  } catch {
+    return frenchName
+  }
+}
+
 async function pickWithClaude(
   anthropic: Anthropic,
   ingredient: ShoppingItem,
-  results: PicnicSellingUnit[]
+  results: PicnicSellingUnit[],
+  dutchName: string
 ): Promise<ClaudePick | null> {
   const candidates = results.map((r) => ({
     product_id: r.id,
@@ -59,7 +76,8 @@ async function pickWithClaude(
       max_tokens: 256,
       system: `Tu choisis le meilleur produit Picnic correspondant à un ingrédient de recette.
 Réponds UNIQUEMENT en JSON, sans markdown :
-{ "product_id": string, "product_name": string, "quantity_to_add": number, "confidence": "high"|"medium"|"low" }
+{ "dutch_name": string, "product_id": string, "product_name": string, "quantity_to_add": number, "confidence": "high"|"medium"|"low" }
+- dutch_name : traduction néerlandaise de l'ingrédient (confirme ou affine la traduction fournie).
 - product_id DOIT être l'un des id fournis.
 - quantity_to_add : nombre d'unités du produit à ajouter au panier compte tenu de la quantité nécessaire (minimum 1).
 - confidence : "high" si le produit correspond clairement, "medium" si approximatif, "low" si incertain.`,
@@ -67,6 +85,7 @@ Réponds UNIQUEMENT en JSON, sans markdown :
         {
           role: 'user',
           content: `Ingrédient : "${ingredient.name}" (${qtyText}).
+Traduction néerlandaise : "${dutchName}"
 Résultats de recherche Picnic :
 ${JSON.stringify(candidates)}`,
         },
@@ -77,6 +96,7 @@ ${JSON.stringify(candidates)}`,
     if (!match) return null
     const parsed = JSON.parse(match[0])
     return {
+      dutch_name: String(parsed.dutch_name ?? dutchName),
       product_id: String(parsed.product_id),
       product_name: String(parsed.product_name ?? ''),
       quantity_to_add: normQuantity(parsed.quantity_to_add),
@@ -155,15 +175,15 @@ export async function POST(request: NextRequest) {
         unit_quantity: null,
       }
       if (mapping.remembered) {
-        auto_added.push({ ingredient: item, product, quantity_to_add: 1, remembered: true })
+        auto_added.push({ ingredient: item, product, quantity_to_add: 1, remembered: true, dutch_name: mapping.dutch_name })
       } else {
-        // Pre-filled from a previous (non-remembered) choice — still reviewed
         to_review.push({
           ingredient: item,
           suggested_product: product,
           quantity_to_add: 1,
           confidence: 'high',
           has_previous_mapping: true,
+          dutch_name: mapping.dutch_name,
         })
       }
     } else {
@@ -171,11 +191,15 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Search + Claude match for unmapped ingredients (limited concurrency)
+  // Translate → search (Dutch) → Claude pick for unmapped ingredients (limited concurrency)
   const searched = await mapWithConcurrency(toSearch, 4, async ({ item }) => {
+    // Step 1: translate French ingredient name to Dutch
+    const dutchName = await translateToNL(anthropic, item.name)
+
+    // Step 2: search Picnic catalog using the Dutch name
     let results: PicnicSellingUnit[] = []
     try {
-      results = (await client.catalog.search(item.name)) as unknown as PicnicSellingUnit[]
+      results = (await client.catalog.search(dutchName)) as unknown as PicnicSellingUnit[]
     } catch {
       results = []
     }
@@ -184,7 +208,9 @@ export async function POST(request: NextRequest) {
     }
 
     const top = results.slice(0, 5)
-    const pick = await pickWithClaude(anthropic, item, top)
+
+    // Step 3: Claude confirms Dutch name and picks the best product
+    const pick = await pickWithClaude(anthropic, item, top, dutchName)
 
     // Resolve the chosen selling unit (fall back to first result)
     const chosen = (pick && top.find((r) => r.id === pick.product_id)) || top[0]
@@ -206,6 +232,7 @@ export async function POST(request: NextRequest) {
       quantity_to_add: pick ? pick.quantity_to_add : 1,
       confidence,
       has_previous_mapping: false,
+      dutch_name: pick?.dutch_name ?? dutchName,
     }
     return { item, review }
   })

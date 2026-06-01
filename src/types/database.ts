@@ -101,6 +101,7 @@ export interface PicnicIngredientMapping {
   picnic_product_id: string
   picnic_product_name: string
   picnic_product_image_url: string | null
+  dutch_name: string | null
   remembered: boolean
   last_used_at: string
 }
@@ -122,6 +123,7 @@ export interface PicnicReviewItem {
   quantity_to_add: number
   confidence: MatchConfidence
   has_previous_mapping: boolean
+  dutch_name?: string | null
 }
 
 export interface PicnicAutoItem {
@@ -129,6 +131,7 @@ export interface PicnicAutoItem {
   product: PicnicProduct
   quantity_to_add: number
   remembered: true
+  dutch_name?: string | null
 }
 
 export interface PicnicMatchResult {

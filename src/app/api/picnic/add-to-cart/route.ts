@@ -12,6 +12,7 @@ interface CartItemInput {
   remember: boolean
   picnic_product_name?: string
   picnic_product_image_url?: string | null
+  dutch_name?: string | null
 }
 
 export async function POST(request: NextRequest) {
@@ -47,6 +48,7 @@ export async function POST(request: NextRequest) {
       picnic_product_id: i.picnic_product_id,
       picnic_product_name: i.picnic_product_name ?? '',
       picnic_product_image_url: i.picnic_product_image_url ?? null,
+      dutch_name: i.dutch_name ?? null,
       remembered: !!i.remember,
       last_used_at: now,
     }))

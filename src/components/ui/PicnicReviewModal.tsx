@@ -19,6 +19,7 @@ interface EditableReview {
   confidence: MatchConfidence
   hasPrevious: boolean
   included: boolean
+  dutchName?: string | null
 }
 
 interface PicnicReviewModalProps {
@@ -95,6 +96,7 @@ export default function PicnicReviewModal({ ingredients, period, onClose }: Picn
             confidence: r.confidence,
             hasPrevious: r.has_previous_mapping,
             included: true,
+            dutchName: r.dutch_name ?? null,
           }))
         )
         setNotFound((data.not_found ?? []).map((n) => n.ingredient))
@@ -157,6 +159,7 @@ export default function PicnicReviewModal({ ingredients, period, onClose }: Picn
         remember: true,
         picnic_product_name: a.product.product_name,
         picnic_product_image_url: a.product.image_url,
+        dutch_name: a.dutch_name ?? null,
       })),
       ...includedReviews.map((r) => ({
         picnic_product_id: r.product!.product_id,
@@ -165,6 +168,7 @@ export default function PicnicReviewModal({ ingredients, period, onClose }: Picn
         remember: r.remember,
         picnic_product_name: r.product!.product_name,
         picnic_product_image_url: r.product!.image_url,
+        dutch_name: r.dutchName ?? null,
       })),
     ]
     try {
