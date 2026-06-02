@@ -1,12 +1,12 @@
 'use client'
 
 import { useState, useRef } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Recipe, RecipeType } from '@/types/database'
 import Badge from '@/components/ui/Badge'
 import BatchIngredientImport from '@/components/ui/BatchIngredientImport'
 import AddToPlannerSheet from '@/components/ui/AddToPlannerSheet'
+import CreateRecipeSheet from '@/components/ui/CreateRecipeSheet'
 
 const RECIPE_TYPES: RecipeType[] = ['Plat', 'Salade', 'Soupe', 'Entrée', 'Accompagnement', 'Dessert']
 
@@ -50,6 +50,7 @@ export default function RecipesList({ recipes, authors, ingredientCounts, stepCo
   const [sortDir, setSortDir] = useState<SortDir>('asc')
 
   const [showBatchImport, setShowBatchImport] = useState(false)
+  const [showCreateSheet, setShowCreateSheet] = useState(false)
   const [plannerRecipe, setPlannerRecipe] = useState<Recipe | null>(null)
   const [plannerToast, setPlannerToast] = useState(false)
 
@@ -181,9 +182,12 @@ export default function RecipesList({ recipes, authors, ingredientCounts, stepCo
             {importStep === 'loading' ? 'Lecture...' : importStep === 'importing' ? 'Import...' : 'TSV'}
           </button>
           <input ref={fileInputRef} type="file" accept=".tsv,.txt,.csv" className="hidden" onChange={handleFileChange} />
-          <Link href="/recettes/nouvelle" className="text-sm px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium">
+          <button
+            onClick={() => setShowCreateSheet(true)}
+            className="text-sm px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+          >
             + Ajouter
-          </Link>
+          </button>
         </div>
       </div>
 
@@ -415,6 +419,9 @@ export default function RecipesList({ recipes, authors, ingredientCounts, stepCo
           </div>
         </div>
       )}
+
+      {/* Create recipe sheet */}
+      {showCreateSheet && <CreateRecipeSheet onClose={() => setShowCreateSheet(false)} />}
 
       {/* Add to planner sheet */}
       {plannerRecipe && (
