@@ -259,7 +259,14 @@ function MealPlanCard({ mpr, onRemove, onServingsChange, onDayChange, onMoveToNe
                 {dayLabel(mpr.day_of_week)}
               </span>
             )}
-            <h3 className="font-semibold text-gray-900 truncate">{recipe.name}</h3>
+            <h3 className="font-semibold text-gray-900 truncate">
+              <Link
+                href={`/recettes/${mpr.recipe_id}`}
+                className="no-underline hover:underline"
+              >
+                {recipe.name}
+              </Link>
+            </h3>
           </div>
           {recipe.author && (
             <p className="text-xs text-gray-400 mt-0.5 truncate">{recipe.author}</p>
