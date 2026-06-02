@@ -46,7 +46,7 @@ export default async function HomePage() {
   // et pas de requête séparée.
   const { data: recipesRaw, error } = await supabase
     .from('recipes')
-    .select('*, ingredients(count), recipe_steps(count)')
+    .select('*, ingredients(count)')
     .eq('household_id', householdMember.household_id)
     .order('name', { ascending: true })
 
@@ -55,14 +55,11 @@ export default async function HomePage() {
   }
 
   const ingredientCounts: Record<string, number> = {}
-  const stepCounts: Record<string, number> = {}
   const recipes = (recipesRaw ?? []).map((row) => {
     const ingList = row.ingredients as { count: number }[] | null
-    const stepList = row.recipe_steps as { count: number }[] | null
     ingredientCounts[row.id] = ingList?.[0]?.count ?? 0
-    stepCounts[row.id] = stepList?.[0]?.count ?? 0
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { ingredients: _ing, recipe_steps: _steps, ...recipe } = row
+    const { ingredients: _ing, ...recipe } = row
     return recipe
   })
 
@@ -71,5 +68,5 @@ export default async function HomePage() {
     (recipes ?? []).map((r) => r.author).filter((a): a is string => !!a)
   )].sort((a, b) => a.localeCompare(b, 'fr'))
 
-  return <RecipesList recipes={recipes ?? []} authors={authors} ingredientCounts={ingredientCounts} stepCounts={stepCounts} />
+  return <RecipesList recipes={recipes ?? []} authors={authors} ingredientCounts={ingredientCounts} />
 }

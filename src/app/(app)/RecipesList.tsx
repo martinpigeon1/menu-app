@@ -28,7 +28,6 @@ interface RecipesListProps {
   recipes: Recipe[]
   authors: string[]
   ingredientCounts: Record<string, number>
-  stepCounts: Record<string, number>
 }
 
 const DEFAULT_DIR: Record<SortKey, SortDir> = {
@@ -38,7 +37,7 @@ const DEFAULT_DIR: Record<SortKey, SortDir> = {
   prep_time: 'asc',
 }
 
-export default function RecipesList({ recipes, authors, ingredientCounts, stepCounts }: RecipesListProps) {
+export default function RecipesList({ recipes, authors, ingredientCounts }: RecipesListProps) {
   const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -337,9 +336,12 @@ export default function RecipesList({ recipes, authors, ingredientCounts, stepCo
                 >
                   Note <SortArrow k="rating" />
                 </th>
-                {/* Ing: 16% mobile → 13% desktop */}
-                <th className="w-[16%] sm:w-[13%] px-3 py-2 text-left text-xs font-semibold text-gray-500">
-                  Ing.
+                {/* Temps: 16% mobile → 13% desktop */}
+                <th
+                  onClick={() => handleSort('prep_time')}
+                  className="w-[16%] sm:w-[13%] px-3 py-2 text-left text-xs font-semibold text-gray-500 cursor-pointer select-none hover:text-gray-800 transition-colors"
+                >
+                  Temps <SortArrow k="prep_time" />
                 </th>
                 {/* Actions: 13% mobile → 10% desktop */}
                 <th className="w-[13%] sm:w-[10%] px-3 py-2 text-left text-xs font-semibold text-gray-500">
@@ -349,8 +351,6 @@ export default function RecipesList({ recipes, authors, ingredientCounts, stepCo
             </thead>
             <tbody>
               {filtered.map((recipe, i) => {
-                const ingCount = ingredientCounts[recipe.id] ?? 0
-                const stepCount = stepCounts[recipe.id] ?? 0
                 return (
                   <tr
                     key={recipe.id}
@@ -380,17 +380,12 @@ export default function RecipesList({ recipes, authors, ingredientCounts, stepCo
                       }
                     </td>
 
-                    {/* Ingrédients + étapes */}
+                    {/* Temps de préparation */}
                     <td className="px-3 py-2.5 text-xs overflow-hidden">
-                      <div className="flex flex-col gap-0.5">
-                        {ingCount > 0
-                          ? <span className="text-gray-700 whitespace-nowrap">✅ {ingCount}</span>
-                          : <span className="text-amber-500">⚠️</span>
-                        }
-                        {stepCount > 0 && (
-                          <span className="text-gray-500 whitespace-nowrap">📋 {stepCount}</span>
-                        )}
-                      </div>
+                      {recipe.prep_time_minutes != null
+                        ? <span className="text-gray-500 whitespace-nowrap">{recipe.prep_time_minutes} min</span>
+                        : <span className="text-gray-300">—</span>
+                      }
                     </td>
 
                     {/* Actions: 📅 only, centred, 36×36 touch target */}
