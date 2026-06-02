@@ -1,14 +1,13 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { Recipe, RecipeType, RecipeSource, Ingredient, RecipeStep } from '@/types/database'
 import Badge from '@/components/ui/Badge'
 import StarRating from '@/components/ui/StarRating'
-import IngredientImportModal, { ImportResult } from '@/components/ui/IngredientImportModal'
-import StepsUrlImportModal, { StepsImportResult } from '@/components/ui/StepsUrlImportModal'
+import RecipeExtractPreview, { ExtractResult, ReviewedRecipe } from '@/components/ui/RecipeExtractPreview'
 import StepText from '@/components/ui/StepText'
 import AddToPlannerSheet from '@/components/ui/AddToPlannerSheet'
 
@@ -18,6 +17,7 @@ export default function RecipeDetailPage() {
   const params = useParams()
   const router = useRouter()
   const id = params.id as string
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [recipe, setRecipe] = useState<Recipe | null>(null)
   const [ingredients, setIngredients] = useState<Ingredient[]>([])
@@ -26,11 +26,16 @@ export default function RecipeDetailPage() {
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [showImportModal, setShowImportModal] = useState(false)
-  const [showStepsUrlModal, setShowStepsUrlModal] = useState(false)
   const [showPlannerSheet, setShowPlannerSheet] = useState(false)
   const [plannerToast, setPlannerToast] = useState(false)
   const [instructionsServings, setInstructionsServings] = useState(4)
+
+  // Unified import
+  const [extractStep, setExtractStep] = useState<'idle' | 'loading' | 'preview'>('idle')
+  const [extracted, setExtracted] = useState<ExtractResult | null>(null)
+  const [extractError, setExtractError] = useState<string | null>(null)
+  const [savingImport, setSavingImport] = useState(false)
+  const [showReimport, setShowReimport] = useState(false)
 
   // Edit fields
   const [editName, setEditName] = useState('')
@@ -129,55 +134,92 @@ export default function RecipeDetailPage() {
     router.refresh()
   }
 
-  function handleImportSaved(result: ImportResult) {
-    setShowImportModal(false)
-    if (recipe) {
-      setRecipe({
-        ...recipe,
-        default_servings: result.servings,
-        cook_time_minutes: result.cook_minutes ?? recipe.cook_time_minutes,
-        notes: result.notes ?? recipe.notes,
-      })
-    }
-    setInstructionsServings(result.servings)
-    setIngredients(
-      result.ingredients.map((ing, i) => ({
-        id: `temp-${i}`,
-        recipe_id: id,
-        name: ing.name,
-        quantity: ing.quantity,
-        unit: ing.unit,
-        sort_order: i,
-        created_at: new Date().toISOString(),
-      }))
-    )
-    if (result.steps.length > 0) {
-      setSteps(
-        result.steps.map((step, i) => ({
-          id: `temp-step-${i}`,
-          recipe_id: id,
-          step_number: step.step_number ?? i + 1,
-          text: step.text,
-          created_at: new Date().toISOString(),
-        }))
-      )
+  // ---- Unified import ----
+  async function runExtract(init: RequestInit) {
+    setExtractStep('loading')
+    setExtractError(null)
+    setShowReimport(false)
+    try {
+      const res = await fetch('/api/recipes/extract', init)
+      const data = await res.json()
+      if (!res.ok) {
+        setExtractError(data.error ?? 'Erreur lors de l\'extraction.')
+        setExtractStep('idle')
+        return
+      }
+      setExtracted(data)
+      setExtractStep('preview')
+    } catch {
+      setExtractError('Erreur réseau pendant l\'extraction.')
+      setExtractStep('idle')
     }
   }
 
-  function handleStepsUrlSaved(result: StepsImportResult) {
-    setShowStepsUrlModal(false)
-    if (recipe && result.cook_minutes !== null) {
-      setRecipe({ ...recipe, cook_time_minutes: result.cook_minutes })
+  function importPhoto(file: File) {
+    const formData = new FormData()
+    formData.append('file', file)
+    runExtract({ method: 'POST', body: formData })
+  }
+
+  function importUrl() {
+    if (!recipe?.source_url) return
+    runExtract({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: recipe.source_url }),
+    })
+  }
+
+  async function handleImportSave(data: ReviewedRecipe) {
+    setSavingImport(true)
+    setExtractError(null)
+    try {
+      const supabase = createClient()
+      const source = data.source_url ? 'site' : data.source_book ? 'livre' : (recipe?.source ?? null)
+      const { error: metaErr } = await supabase
+        .from('recipes')
+        .update({
+          name: data.name,
+          author: data.author,
+          type: data.type,
+          source,
+          source_book: data.source_book,
+          source_url: data.source_url,
+          prep_time_minutes: data.prep_minutes,
+          rating: data.rating,
+        })
+        .eq('id', id)
+      if (metaErr) throw new Error(metaErr.message)
+
+      const ingRes = await fetch(`/api/recipes/${id}/ingredients/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ default_servings: data.servings, ingredients: data.ingredients }),
+      })
+      if (!ingRes.ok) {
+        const d = await ingRes.json()
+        throw new Error(d.error ?? 'Erreur lors de la sauvegarde des ingrédients.')
+      }
+
+      const stepRes = await fetch(`/api/recipes/${id}/steps/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ steps: data.steps, cook_time_minutes: data.cook_minutes, notes: data.notes }),
+      })
+      if (!stepRes.ok) {
+        const d = await stepRes.json()
+        throw new Error(d.error ?? 'Erreur lors de la sauvegarde des étapes.')
+      }
+
+      await fetchRecipe()
+      setExtractStep('idle')
+      setExtracted(null)
+      setShowReimport(false)
+    } catch (e) {
+      setExtractError(e instanceof Error ? e.message : 'Erreur lors de la sauvegarde.')
+    } finally {
+      setSavingImport(false)
     }
-    setSteps(
-      result.steps.map((step, i) => ({
-        id: `temp-step-${i}`,
-        recipe_id: id,
-        step_number: step.step_number ?? i + 1,
-        text: step.text,
-        created_at: new Date().toISOString(),
-      }))
-    )
   }
 
   function formatQuantity(q: number | null) {
@@ -200,9 +242,24 @@ export default function RecipeDetailPage() {
 
   const sourceLabel: Record<string, string> = { livre: 'Livre', site: 'Site web', autre: 'Autre' }
   const isCookidoo = !!recipe.source_url?.includes('cookidoo')
+  const hasContent = ingredients.length > 0 || steps.length > 0
 
   return (
     <>
+      {/* Hidden file input for photo import */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          if (file) importPhoto(file)
+          e.target.value = ''
+        }}
+      />
+
       <div className="space-y-6">
         {/* Navigation */}
         <div className="flex items-center justify-between">
@@ -232,6 +289,12 @@ export default function RecipeDetailPage() {
           </div>
         </div>
 
+        {extractError && extractStep === 'idle' && (
+          <div className="px-3 py-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg">
+            {extractError}
+          </div>
+        )}
+
         <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-5">
           {!editing ? (
             <>
@@ -256,6 +319,56 @@ export default function RecipeDetailPage() {
                   </div>
                 </div>
               </div>
+
+              {/* Unified import */}
+              {!hasContent ? (
+                <div className="border border-gray-200 rounded-xl p-4 space-y-3">
+                  <p className="text-sm font-medium text-gray-800">📥 Importer depuis une photo ou une URL</p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex-1 flex items-center justify-center gap-1.5 text-sm px-3 py-2 border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+                    >
+                      📷 Photo
+                    </button>
+                    {recipe.source_url && (
+                      <button
+                        onClick={importUrl}
+                        className="flex-1 flex items-center justify-center gap-1.5 text-sm px-3 py-2 border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+                      >
+                        🔗 URL
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : showReimport ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
+                  >
+                    📷 Photo
+                  </button>
+                  {recipe.source_url && (
+                    <button
+                      onClick={importUrl}
+                      className="text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
+                    >
+                      🔗 URL
+                    </button>
+                  )}
+                  <button onClick={() => setShowReimport(false)} className="text-xs text-gray-400 hover:text-gray-600">
+                    Annuler
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowReimport(true)}
+                  className="text-xs text-gray-500 hover:text-gray-700 font-medium"
+                >
+                  📥 Ré-importer
+                </button>
+              )}
 
               {/* Mode cuisine */}
               {steps.length > 0 && (
@@ -312,35 +425,9 @@ export default function RecipeDetailPage() {
 
               {/* Ingrédients */}
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Ingrédients</p>
-                  {ingredients.length > 0 && (
-                    <button
-                      onClick={() => setShowImportModal(true)}
-                      className="text-xs text-green-600 hover:text-green-700 font-medium"
-                    >
-                      Ré-importer
-                    </button>
-                  )}
-                </div>
-
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Ingrédients</p>
                 {ingredients.length === 0 ? (
-                  <div className="flex gap-2 mt-1">
-                    <button
-                      onClick={() => setShowImportModal(true)}
-                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
-                    >
-                      <span>📷</span> Importer depuis photo
-                    </button>
-                    {recipe.source_url && !isCookidoo && (
-                      <button
-                        onClick={() => setShowImportModal(true)}
-                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
-                      >
-                        <span>🔗</span> Récupérer depuis l&apos;URL
-                      </button>
-                    )}
-                  </div>
+                  <p className="text-sm text-gray-400">Aucun ingrédient. Utilisez « Importer » ci-dessus.</p>
                 ) : (
                   <div>
                     <p className="text-xs text-gray-400 mb-2">Pour {recipe.default_servings} personne{recipe.default_servings > 1 ? 's' : ''}</p>
@@ -362,18 +449,7 @@ export default function RecipeDetailPage() {
 
               {/* Instructions */}
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Instructions</p>
-                  {steps.length > 0 && !isCookidoo && (
-                    <button
-                      onClick={() => setShowImportModal(true)}
-                      className="text-xs text-green-600 hover:text-green-700 font-medium"
-                    >
-                      Ré-importer
-                    </button>
-                  )}
-                </div>
-
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Instructions</p>
                 {isCookidoo ? (
                   <div className="space-y-2">
                     <a
@@ -389,22 +465,7 @@ export default function RecipeDetailPage() {
                     </p>
                   </div>
                 ) : steps.length === 0 ? (
-                  <div className="flex gap-2 mt-1">
-                    <button
-                      onClick={() => setShowImportModal(true)}
-                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
-                    >
-                      <span>📷</span> Importer depuis photo
-                    </button>
-                    {recipe.source_url && (
-                      <button
-                        onClick={() => setShowStepsUrlModal(true)}
-                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
-                      >
-                        <span>🔗</span> Extraire depuis l&apos;URL
-                      </button>
-                    )}
-                  </div>
+                  <p className="text-sm text-gray-400">Aucune étape. Utilisez « Importer » ci-dessus.</p>
                 ) : (
                   <div className="space-y-3">
                     {/* Serving selector */}
@@ -565,22 +626,27 @@ export default function RecipeDetailPage() {
         </div>
       </div>
 
-      {showImportModal && (
-        <IngredientImportModal
-          recipeId={id}
-          sourceUrl={recipe.source_url}
-          existingIngredientCount={ingredients.length}
-          onSaved={handleImportSaved}
-          onClose={() => setShowImportModal(false)}
-        />
+      {/* Import: loading overlay */}
+      {extractStep === 'loading' && (
+        <div className="fixed inset-0 z-50 bg-white/90 flex flex-col items-center justify-center gap-4">
+          <div className="w-10 h-10 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm text-gray-600">Claude analyse la recette…</p>
+          <p className="text-xs text-gray-400">Cela prend quelques secondes.</p>
+        </div>
       )}
 
-      {showStepsUrlModal && recipe.source_url && (
-        <StepsUrlImportModal
-          recipeId={id}
-          sourceUrl={recipe.source_url}
-          onSaved={handleStepsUrlSaved}
-          onClose={() => setShowStepsUrlModal(false)}
+      {/* Import: review preview */}
+      {extractStep === 'preview' && extracted && (
+        <RecipeExtractPreview
+          initial={extracted}
+          initialRating={recipe.rating}
+          context="update"
+          existingIngredientCount={ingredients.length}
+          existingStepCount={steps.length}
+          saving={savingImport}
+          error={extractError}
+          onClose={() => { setExtractStep('idle'); setExtracted(null); setExtractError(null) }}
+          onSave={handleImportSave}
         />
       )}
 
