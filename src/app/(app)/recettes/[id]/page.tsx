@@ -4,10 +4,12 @@ import { useEffect, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
-import { Recipe, RecipeType, RecipeSource, Ingredient } from '@/types/database'
+import { Recipe, RecipeType, RecipeSource, Ingredient, RecipeStep } from '@/types/database'
 import Badge from '@/components/ui/Badge'
 import StarRating from '@/components/ui/StarRating'
-import IngredientImportModal, { ExtractedIngredient } from '@/components/ui/IngredientImportModal'
+import IngredientImportModal, { ImportResult } from '@/components/ui/IngredientImportModal'
+import StepsUrlImportModal, { StepsImportResult } from '@/components/ui/StepsUrlImportModal'
+import StepText from '@/components/ui/StepText'
 import AddToPlannerSheet from '@/components/ui/AddToPlannerSheet'
 
 const TYPES: RecipeType[] = ['Plat', 'Salade', 'Soupe', 'Entrée', 'Accompagnement', 'Dessert']
@@ -19,13 +21,16 @@ export default function RecipeDetailPage() {
 
   const [recipe, setRecipe] = useState<Recipe | null>(null)
   const [ingredients, setIngredients] = useState<Ingredient[]>([])
+  const [steps, setSteps] = useState<RecipeStep[]>([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showImportModal, setShowImportModal] = useState(false)
+  const [showStepsUrlModal, setShowStepsUrlModal] = useState(false)
   const [showPlannerSheet, setShowPlannerSheet] = useState(false)
   const [plannerToast, setPlannerToast] = useState(false)
+  const [instructionsServings, setInstructionsServings] = useState(4)
 
   // Edit fields
   const [editName, setEditName] = useState('')
@@ -45,9 +50,10 @@ export default function RecipeDetailPage() {
 
   async function fetchRecipe() {
     const supabase = createClient()
-    const [{ data, error }, { data: ings }] = await Promise.all([
+    const [{ data, error }, { data: ings }, { data: stepRows }] = await Promise.all([
       supabase.from('recipes').select('*').eq('id', id).single(),
       supabase.from('ingredients').select('*').eq('recipe_id', id).order('sort_order'),
+      supabase.from('recipe_steps').select('*').eq('recipe_id', id).order('step_number'),
     ])
 
     if (error || !data) {
@@ -55,6 +61,8 @@ export default function RecipeDetailPage() {
     } else {
       setRecipe(data)
       setIngredients(ings ?? [])
+      setSteps(stepRows ?? [])
+      setInstructionsServings(data.default_servings)
       populateEditFields(data)
     }
     setLoading(false)
@@ -121,17 +129,52 @@ export default function RecipeDetailPage() {
     router.refresh()
   }
 
-  function handleIngredientsSaved(servings: number, newIngredients: ExtractedIngredient[]) {
+  function handleImportSaved(result: ImportResult) {
     setShowImportModal(false)
-    if (recipe) setRecipe({ ...recipe, default_servings: servings })
+    if (recipe) {
+      setRecipe({
+        ...recipe,
+        default_servings: result.servings,
+        cook_time_minutes: result.cook_minutes ?? recipe.cook_time_minutes,
+        notes: result.notes ?? recipe.notes,
+      })
+    }
+    setInstructionsServings(result.servings)
     setIngredients(
-      newIngredients.map((ing, i) => ({
+      result.ingredients.map((ing, i) => ({
         id: `temp-${i}`,
         recipe_id: id,
         name: ing.name,
         quantity: ing.quantity,
         unit: ing.unit,
         sort_order: i,
+        created_at: new Date().toISOString(),
+      }))
+    )
+    if (result.steps.length > 0) {
+      setSteps(
+        result.steps.map((step, i) => ({
+          id: `temp-step-${i}`,
+          recipe_id: id,
+          step_number: step.step_number ?? i + 1,
+          text: step.text,
+          created_at: new Date().toISOString(),
+        }))
+      )
+    }
+  }
+
+  function handleStepsUrlSaved(result: StepsImportResult) {
+    setShowStepsUrlModal(false)
+    if (recipe && result.cook_minutes !== null) {
+      setRecipe({ ...recipe, cook_time_minutes: result.cook_minutes })
+    }
+    setSteps(
+      result.steps.map((step, i) => ({
+        id: `temp-step-${i}`,
+        recipe_id: id,
+        step_number: step.step_number ?? i + 1,
+        text: step.text,
         created_at: new Date().toISOString(),
       }))
     )
@@ -156,6 +199,7 @@ export default function RecipeDetailPage() {
   }
 
   const sourceLabel: Record<string, string> = { livre: 'Livre', site: 'Site web', autre: 'Autre' }
+  const isCookidoo = !!recipe.source_url?.includes('cookidoo')
 
   return (
     <>
@@ -206,19 +250,42 @@ export default function RecipeDetailPage() {
                         {recipe.source === 'livre' && recipe.source_page && `, p. ${recipe.source_page}`}
                       </span>
                     )}
+                    {steps.length > 0 && (
+                      <span className="text-xs text-gray-500 whitespace-nowrap">📋 {steps.length} étape{steps.length !== 1 ? 's' : ''}</span>
+                    )}
                   </div>
                 </div>
               </div>
+
+              {/* Mode cuisine */}
+              {steps.length > 0 && (
+                <Link
+                  href={`/recettes/${id}/cuisine`}
+                  className="flex items-center justify-center gap-2 w-full bg-green-600 text-white py-3 rounded-xl text-sm font-semibold hover:bg-green-700 transition-colors"
+                >
+                  👨‍🍳 Mode cuisine
+                </Link>
+              )}
 
               <div>
                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Note</p>
                 <StarRating value={recipe.rating} onChange={handleRatingChange} size="lg" />
               </div>
 
-              {recipe.prep_time_minutes && (
-                <div>
-                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Temps de préparation</p>
-                  <p className="text-sm text-gray-700">{recipe.prep_time_minutes} min</p>
+              {(recipe.prep_time_minutes || recipe.cook_time_minutes) && (
+                <div className="flex gap-8">
+                  {recipe.prep_time_minutes && (
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Préparation</p>
+                      <p className="text-sm text-gray-700">{recipe.prep_time_minutes} min</p>
+                    </div>
+                  )}
+                  {recipe.cook_time_minutes && (
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Cuisson</p>
+                      <p className="text-sm text-gray-700">{recipe.cook_time_minutes} min</p>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -265,7 +332,7 @@ export default function RecipeDetailPage() {
                     >
                       <span>📷</span> Importer depuis photo
                     </button>
-                    {recipe.source_url && (
+                    {recipe.source_url && !isCookidoo && (
                       <button
                         onClick={() => setShowImportModal(true)}
                         className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
@@ -289,6 +356,95 @@ export default function RecipeDetailPage() {
                         </li>
                       ))}
                     </ul>
+                  </div>
+                )}
+              </div>
+
+              {/* Instructions */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Instructions</p>
+                  {steps.length > 0 && !isCookidoo && (
+                    <button
+                      onClick={() => setShowImportModal(true)}
+                      className="text-xs text-green-600 hover:text-green-700 font-medium"
+                    >
+                      Ré-importer
+                    </button>
+                  )}
+                </div>
+
+                {isCookidoo ? (
+                  <div className="space-y-2">
+                    <a
+                      href={recipe.source_url!}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-center gap-2 w-full bg-gray-900 text-white py-3 rounded-xl text-sm font-semibold hover:bg-black transition-colors"
+                    >
+                      🌐 Ouvrir dans Cookidoo
+                    </a>
+                    <p className="text-xs text-gray-400 text-center">
+                      Les instructions sont disponibles directement sur Cookidoo et sur votre Thermomix
+                    </p>
+                  </div>
+                ) : steps.length === 0 ? (
+                  <div className="flex gap-2 mt-1">
+                    <button
+                      onClick={() => setShowImportModal(true)}
+                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
+                    >
+                      <span>📷</span> Importer depuis photo
+                    </button>
+                    {recipe.source_url && (
+                      <button
+                        onClick={() => setShowStepsUrlModal(true)}
+                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
+                      >
+                        <span>🔗</span> Extraire depuis l&apos;URL
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {/* Serving selector */}
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-gray-500">Pour</span>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => setInstructionsServings((s) => Math.max(1, s - 1))}
+                          disabled={instructionsServings <= 1}
+                          className="w-7 h-7 flex items-center justify-center rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 transition-colors"
+                        >
+                          −
+                        </button>
+                        <span className="w-6 text-center font-semibold text-gray-900 text-sm">{instructionsServings}</span>
+                        <button
+                          onClick={() => setInstructionsServings((s) => s + 1)}
+                          className="w-7 h-7 flex items-center justify-center rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
+                        >
+                          +
+                        </button>
+                      </div>
+                      <span className="text-xs text-gray-500">personne{instructionsServings > 1 ? 's' : ''}</span>
+                    </div>
+
+                    <ol className="space-y-3">
+                      {steps.map((step, i) => (
+                        <li key={step.id} className="flex gap-3">
+                          <span className="mt-0.5 w-6 h-6 flex-shrink-0 flex items-center justify-center rounded-full bg-green-100 text-green-700 text-xs font-semibold">
+                            {i + 1}
+                          </span>
+                          <p className="text-sm text-gray-700 leading-relaxed">
+                            <StepText
+                              text={step.text}
+                              selectedServings={instructionsServings}
+                              defaultServings={recipe.default_servings}
+                            />
+                          </p>
+                        </li>
+                      ))}
+                    </ol>
                   </div>
                 )}
               </div>
@@ -413,8 +569,18 @@ export default function RecipeDetailPage() {
         <IngredientImportModal
           recipeId={id}
           sourceUrl={recipe.source_url}
-          onSaved={handleIngredientsSaved}
+          existingIngredientCount={ingredients.length}
+          onSaved={handleImportSaved}
           onClose={() => setShowImportModal(false)}
+        />
+      )}
+
+      {showStepsUrlModal && recipe.source_url && (
+        <StepsUrlImportModal
+          recipeId={id}
+          sourceUrl={recipe.source_url}
+          onSaved={handleStepsUrlSaved}
+          onClose={() => setShowStepsUrlModal(false)}
         />
       )}
 

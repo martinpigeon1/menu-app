@@ -1,6 +1,7 @@
 'use client'
 
 import { useRef, useState } from 'react'
+import { parseStepText } from '@/lib/scale'
 
 export interface ExtractedIngredient {
   name: string
@@ -8,10 +9,25 @@ export interface ExtractedIngredient {
   unit: string | null
 }
 
+export interface ExtractedStep {
+  step_number: number
+  text: string
+}
+
+export interface ImportResult {
+  servings: number
+  ingredients: ExtractedIngredient[]
+  steps: ExtractedStep[]
+  cook_minutes: number | null
+  notes: string | null
+}
+
 interface IngredientImportModalProps {
   recipeId: string
   sourceUrl: string | null
-  onSaved: (servings: number, ingredients: ExtractedIngredient[]) => void
+  /** How many ingredients the recipe already has — triggers a replace warning. */
+  existingIngredientCount?: number
+  onSaved: (result: ImportResult) => void
   onClose: () => void
 }
 
@@ -20,6 +36,7 @@ type Mode = 'choose' | 'loading' | 'preview' | 'saving'
 export default function IngredientImportModal({
   recipeId,
   sourceUrl,
+  existingIngredientCount = 0,
   onSaved,
   onClose,
 }: IngredientImportModalProps) {
@@ -28,6 +45,9 @@ export default function IngredientImportModal({
   const [error, setError] = useState<string | null>(null)
   const [servings, setServings] = useState(4)
   const [ingredients, setIngredients] = useState<ExtractedIngredient[]>([])
+  const [steps, setSteps] = useState<ExtractedStep[]>([])
+  const [cookMinutes, setCookMinutes] = useState<number | null>(null)
+  const [notes, setNotes] = useState<string | null>(null)
 
   const isCookidoo = sourceUrl?.includes('cookidoo')
 
@@ -37,7 +57,8 @@ export default function IngredientImportModal({
     const formData = new FormData()
     formData.append('file', file)
     try {
-      const res = await fetch(`/api/recipes/${recipeId}/ingredients/extract-photo`, {
+      // Combined extraction: ingredients AND steps from a single photo.
+      const res = await fetch(`/api/recipes/${recipeId}/steps/extract-photo`, {
         method: 'POST',
         body: formData,
       })
@@ -47,8 +68,11 @@ export default function IngredientImportModal({
         setMode('choose')
         return
       }
-      setServings(data.default_servings ?? 4)
+      setServings(data.servings ?? 4)
       setIngredients(data.ingredients ?? [])
+      setSteps(data.steps ?? [])
+      setCookMinutes(data.cook_minutes ?? null)
+      setNotes(data.notes ?? null)
       setMode('preview')
     } catch {
       setError('Erreur réseau.')
@@ -74,6 +98,9 @@ export default function IngredientImportModal({
       }
       setServings(data.default_servings ?? 4)
       setIngredients(data.ingredients ?? [])
+      setSteps([])
+      setCookMinutes(null)
+      setNotes(null)
       setMode('preview')
     } catch {
       setError('Erreur réseau.')
@@ -84,18 +111,35 @@ export default function IngredientImportModal({
   async function handleSave() {
     setMode('saving')
     try {
-      const res = await fetch(`/api/recipes/${recipeId}/ingredients/save`, {
+      // Save ingredients.
+      const ingRes = await fetch(`/api/recipes/${recipeId}/ingredients/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ default_servings: servings, ingredients }),
       })
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data.error ?? 'Erreur lors de la sauvegarde')
+      const ingData = await ingRes.json()
+      if (!ingRes.ok) {
+        setError(ingData.error ?? 'Erreur lors de la sauvegarde des ingrédients')
         setMode('preview')
         return
       }
-      onSaved(servings, ingredients)
+
+      // Save steps if the photo extraction returned any.
+      if (steps.length > 0) {
+        const stepRes = await fetch(`/api/recipes/${recipeId}/steps/save`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ steps, cook_time_minutes: cookMinutes, notes }),
+        })
+        const stepData = await stepRes.json()
+        if (!stepRes.ok) {
+          setError(stepData.error ?? 'Erreur lors de la sauvegarde des étapes')
+          setMode('preview')
+          return
+        }
+      }
+
+      onSaved({ servings, ingredients, steps, cook_minutes: cookMinutes, notes })
     } catch {
       setError('Erreur réseau.')
       setMode('preview')
@@ -118,12 +162,20 @@ export default function IngredientImportModal({
     setIngredients((prev) => prev.filter((_, idx) => idx !== i))
   }
 
+  function updateStep(i: number, value: string) {
+    setSteps((prev) => {
+      const updated = [...prev]
+      updated[i] = { ...updated[i], text: value }
+      return updated
+    })
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-white sm:items-center sm:justify-center sm:bg-black/50">
       <div className="flex flex-col h-full sm:h-auto sm:max-h-[90vh] sm:w-full sm:max-w-lg sm:rounded-2xl sm:bg-white overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 flex-shrink-0">
-          <h3 className="font-semibold text-gray-900">Importer les ingrédients</h3>
+          <h3 className="font-semibold text-gray-900">Importer la recette</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
         </div>
 
@@ -138,7 +190,7 @@ export default function IngredientImportModal({
           {mode === 'choose' && (
             <div className="space-y-3">
               <p className="text-sm text-gray-600 mb-4">
-                Choisissez comment importer les ingrédients.
+                La photo extrait les ingrédients <strong>et</strong> les étapes en une fois.
               </p>
 
               {/* Photo button */}
@@ -149,7 +201,7 @@ export default function IngredientImportModal({
                 <span className="text-2xl">📷</span>
                 <div>
                   <p className="font-medium text-gray-800 text-sm">Importer depuis photo</p>
-                  <p className="text-xs text-gray-500">Prends une photo de la recette</p>
+                  <p className="text-xs text-gray-500">Ingrédients + étapes</p>
                 </div>
               </button>
               <input
@@ -165,7 +217,7 @@ export default function IngredientImportModal({
                 }}
               />
 
-              {/* URL button */}
+              {/* URL button (ingredients only) */}
               {sourceUrl ? (
                 <button
                   onClick={extractFromUrl}
@@ -177,7 +229,7 @@ export default function IngredientImportModal({
                   <div>
                     <p className="font-medium text-gray-800 text-sm">Récupérer depuis l&apos;URL</p>
                     <p className="text-xs text-gray-500 truncate max-w-[240px]">
-                      {isCookidoo ? 'Non disponible (Cookidoo)' : sourceUrl}
+                      {isCookidoo ? 'Non disponible (Cookidoo)' : 'Ingrédients seulement'}
                     </p>
                   </div>
                 </button>
@@ -196,12 +248,18 @@ export default function IngredientImportModal({
           {mode === 'loading' && (
             <div className="flex flex-col items-center justify-center py-12 gap-3">
               <div className="w-8 h-8 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
-              <p className="text-sm text-gray-600">Claude analyse la photo…</p>
+              <p className="text-sm text-gray-600">Claude analyse la recette…</p>
             </div>
           )}
 
           {mode === 'preview' && (
-            <div className="space-y-4">
+            <div className="space-y-5">
+              {existingIngredientCount > 0 && (
+                <div className="px-3 py-2 bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg">
+                  Cette recette a déjà {existingIngredientCount} ingrédient{existingIngredientCount !== 1 ? 's' : ''}. Les remplacer&nbsp;?
+                </div>
+              )}
+
               <div className="flex items-center gap-3">
                 <label className="text-sm font-medium text-gray-700 whitespace-nowrap">Portions :</label>
                 <input
@@ -213,9 +271,10 @@ export default function IngredientImportModal({
                 />
               </div>
 
+              {/* Ingredients */}
               <div className="space-y-2">
                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                  {ingredients.length} ingrédient{ingredients.length !== 1 ? 's' : ''} — modifiables
+                  Ingrédients ({ingredients.length}) — modifiables
                 </p>
                 {ingredients.map((ing, i) => (
                   <div key={i} className="flex gap-2 items-center">
@@ -249,6 +308,31 @@ export default function IngredientImportModal({
                   </div>
                 ))}
               </div>
+
+              {/* Steps (photo only) */}
+              {steps.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                    Étapes ({steps.length}) — modifiables
+                  </p>
+                  {steps.map((step, i) => (
+                    <div key={i} className="flex gap-2 items-start">
+                      <span className="mt-2 w-5 h-5 flex-shrink-0 flex items-center justify-center rounded-full bg-green-100 text-green-700 text-[11px] font-semibold">
+                        {i + 1}
+                      </span>
+                      <textarea
+                        value={step.text}
+                        onChange={(e) => updateStep(i, e.target.value)}
+                        rows={2}
+                        className="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-green-500 resize-none"
+                      />
+                    </div>
+                  ))}
+                  <p className="text-[11px] text-gray-400">
+                    Les quantités entre [[ ]] s&apos;adaptent aux portions à l&apos;affichage.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
@@ -265,13 +349,13 @@ export default function IngredientImportModal({
           <div className="flex gap-3 p-4 border-t border-gray-100 flex-shrink-0">
             <button
               onClick={handleSave}
-              disabled={ingredients.length === 0}
+              disabled={ingredients.length === 0 && steps.length === 0}
               className="flex-1 bg-green-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50 transition-colors"
             >
-              Sauvegarder {ingredients.length} ingrédient{ingredients.length !== 1 ? 's' : ''}
+              Sauvegarder
             </button>
             <button
-              onClick={() => { setMode('choose'); setIngredients([]); setError(null) }}
+              onClick={() => { setMode('choose'); setIngredients([]); setSteps([]); setError(null) }}
               className="px-4 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors"
             >
               Retour

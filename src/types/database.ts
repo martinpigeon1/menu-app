@@ -15,6 +15,7 @@ export interface Recipe {
   type: RecipeType
   rating: number | null
   prep_time_minutes: number | null
+  cook_time_minutes: number | null
   notes: string | null
   default_servings: number
   created_at: string
@@ -28,6 +29,15 @@ export interface Ingredient {
   quantity: number | null
   unit: string | null
   sort_order: number
+  created_at: string
+}
+
+export interface RecipeStep {
+  id: string
+  recipe_id: string
+  step_number: number
+  // Ingredient quantities wrapped in [[value]] placeholders, scaled at render time.
+  text: string
   created_at: string
 }
 

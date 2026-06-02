@@ -28,6 +28,7 @@ interface RecipesListProps {
   recipes: Recipe[]
   authors: string[]
   ingredientCounts: Record<string, number>
+  stepCounts: Record<string, number>
 }
 
 const DEFAULT_DIR: Record<SortKey, SortDir> = {
@@ -37,7 +38,7 @@ const DEFAULT_DIR: Record<SortKey, SortDir> = {
   prep_time: 'asc',
 }
 
-export default function RecipesList({ recipes, authors, ingredientCounts }: RecipesListProps) {
+export default function RecipesList({ recipes, authors, ingredientCounts, stepCounts }: RecipesListProps) {
   const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -345,6 +346,7 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
             <tbody>
               {filtered.map((recipe, i) => {
                 const ingCount = ingredientCounts[recipe.id] ?? 0
+                const stepCount = stepCounts[recipe.id] ?? 0
                 return (
                   <tr
                     key={recipe.id}
@@ -374,12 +376,17 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
                       }
                     </td>
 
-                    {/* Ingrédients */}
+                    {/* Ingrédients + étapes */}
                     <td className="px-3 py-2.5 text-xs overflow-hidden">
-                      {ingCount > 0
-                        ? <span className="text-gray-700 whitespace-nowrap">✅ {ingCount}</span>
-                        : <span className="text-amber-500">⚠️</span>
-                      }
+                      <div className="flex flex-col gap-0.5">
+                        {ingCount > 0
+                          ? <span className="text-gray-700 whitespace-nowrap">✅ {ingCount}</span>
+                          : <span className="text-amber-500">⚠️</span>
+                        }
+                        {stepCount > 0 && (
+                          <span className="text-gray-500 whitespace-nowrap">📋 {stepCount}</span>
+                        )}
+                      </div>
                     </td>
 
                     {/* Actions: 📅 only, centred, 36×36 touch target */}
