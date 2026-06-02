@@ -90,14 +90,35 @@ function CreerRecetteFlow() {
   }
 
   async function extractFromUrl() {
-    if (!urlInput.trim()) return
+    const trimmed = urlInput.trim()
+    if (!trimmed) return
+
+    // Cookidoo pages are protected (403) — no automatic analysis possible.
+    // Skip the round-trip and go straight to a pre-filled preview.
+    if (trimmed.includes('cookidoo')) {
+      applyExtraction({
+        name: '',
+        author: 'Cookidoo',
+        source_book: null,
+        source_url: trimmed,
+        type: 'Plat',
+        servings: 4,
+        prep_minutes: null,
+        cook_minutes: null,
+        ingredients: [],
+        steps: [],
+        notes: null,
+      })
+      return
+    }
+
     setStep('loading')
     setError(null)
     try {
       const res = await fetch('/api/recipes/extract-from-url', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: urlInput.trim() }),
+        body: JSON.stringify({ url: trimmed }),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -328,6 +349,14 @@ function CreerRecetteFlow() {
 
         {error && (
           <div className="px-3 py-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg">{error}</div>
+        )}
+
+        {isCookidoo && (
+          <div className="px-3 py-2 bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg">
+            Les recettes Cookidoo sont protégées : l&apos;analyse automatique n&apos;est pas
+            possible. Renseignez au moins le <strong>nom</strong>, puis enregistrez. Les
+            ingrédients et les étapes restent disponibles sur Cookidoo et votre Thermomix.
+          </div>
         )}
 
         {/* METADATA */}
