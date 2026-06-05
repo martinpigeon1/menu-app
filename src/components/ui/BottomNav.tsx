@@ -8,10 +8,11 @@ export default function BottomNav() {
 
   const isCourses = pathname.startsWith('/planner/shopping-list')
   const isPlanner = pathname.startsWith('/planner') && !isCourses
-  const isRecettes = !isPlanner && !isCourses
+  const isChef = pathname.startsWith('/chef')
+  const isRecettes = !isPlanner && !isCourses && !isChef
 
   const cls = (active: boolean) =>
-    `flex flex-col items-center gap-0.5 px-5 py-2 text-xs font-medium transition-colors ${
+    `flex flex-col items-center gap-0.5 px-3 py-2 text-xs font-medium transition-colors ${
       active ? 'text-green-600' : 'text-gray-400'
     }`
 
@@ -28,6 +29,10 @@ export default function BottomNav() {
       <Link href="/planner/shopping-list" className={cls(isCourses)}>
         <span className="text-xl">🛒</span>
         Courses
+      </Link>
+      <Link href="/chef" className={cls(isChef)}>
+        <span className="text-xl">💬</span>
+        Chef
       </Link>
     </nav>
   )

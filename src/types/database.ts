@@ -149,3 +149,21 @@ export interface PicnicMatchResult {
   auto_added: PicnicAutoItem[]
   not_found: { ingredient: ShoppingItem }[]
 }
+
+// --- Chef AI assistant (Phase 5) ---
+
+export interface ChefMessage {
+  role: 'user' | 'assistant'
+  content: string // assistant content may contain [[RECIPE:{id}:{name}]] markers
+  timestamp: string // ISO
+  suggested_recipe_ids?: string[]
+}
+
+// Compact recipe surfaced by the chat for inline cards.
+export interface ChefSuggestedRecipe {
+  id: string
+  name: string
+  type: RecipeType
+  rating: number | null
+  author: string | null
+}
