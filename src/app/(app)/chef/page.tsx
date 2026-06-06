@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { ChefMessage, Recipe } from '@/types/database'
 import ChefRecipeChip from '@/components/ui/ChefRecipeChip'
@@ -27,7 +28,8 @@ const CHIPS: { label: string; message: string }[] = [
   { label: '🗓️ Plan de la semaine', message: 'Aide-moi à planifier les repas de la semaine.' },
 ]
 
-export default function ChefPage() {
+function ChefChat() {
+  const searchParams = useSearchParams()
   const [messages, setMessages] = useState<ChefMessage[]>([])
   const [recipeMap, setRecipeMap] = useState<Map<string, Recipe>>(new Map())
   const [recipeCount, setRecipeCount] = useState(0)
@@ -39,6 +41,17 @@ export default function ChefPage() {
   const [plannerRecipe, setPlannerRecipe] = useState<Recipe | null>(null)
   const [plannerToast, setPlannerToast] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  // Pre-fill (and focus) from a ?q= param coming from the home dashboard,
+  // without auto-sending so the user can review first.
+  useEffect(() => {
+    const q = searchParams.get('q')
+    if (q) {
+      setInput(q)
+      inputRef.current?.focus()
+    }
+  }, [searchParams])
 
   useEffect(() => {
     async function load() {
@@ -211,6 +224,7 @@ export default function ChefPage() {
             {/* Input bar */}
             <div className="flex items-center gap-2 px-3 pb-3 pt-1">
               <input
+                ref={inputRef}
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -250,5 +264,13 @@ export default function ChefPage() {
         </div>
       )}
     </>
+  )
+}
+
+export default function ChefPage() {
+  return (
+    <Suspense fallback={<div className="text-center py-12 text-gray-500 text-sm">Chargement…</div>}>
+      <ChefChat />
+    </Suspense>
   )
 }

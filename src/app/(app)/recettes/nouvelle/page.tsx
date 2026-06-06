@@ -68,7 +68,7 @@ export default function NouvelleRecettePage() {
       setError('Erreur lors de l\'enregistrement : ' + insertError.message)
       setSaving(false)
     } else {
-      router.push('/')
+      router.push('/recettes')
       router.refresh()
     }
   }
@@ -76,7 +76,7 @@ export default function NouvelleRecettePage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <Link href="/" className="text-gray-400 hover:text-gray-600">
+        <Link href="/recettes" className="text-gray-400 hover:text-gray-600">
           ← Retour
         </Link>
         <h2 className="text-xl font-bold text-gray-900">Nouvelle recette</h2>
@@ -224,7 +224,7 @@ export default function NouvelleRecettePage() {
             {saving ? 'Enregistrement…' : 'Enregistrer'}
           </button>
           <Link
-            href="/"
+            href="/recettes"
             className="px-4 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors text-center"
           >
             Annuler

@@ -130,7 +130,7 @@ export default function RecipeDetailPage() {
 
     const supabase = createClient()
     await supabase.from('recipes').delete().eq('id', recipe.id)
-    router.push('/')
+    router.push('/recettes')
     router.refresh()
   }
 
@@ -141,7 +141,7 @@ export default function RecipeDetailPage() {
     if (typeof window !== 'undefined' && window.history.length > 1) {
       router.back()
     } else {
-      router.push('/')
+      router.push('/recettes')
     }
   }
 
@@ -246,7 +246,7 @@ export default function RecipeDetailPage() {
     return (
       <div className="text-center py-12">
         <p className="text-red-600 text-sm mb-4">{error ?? 'Recette introuvable.'}</p>
-        <Link href="/" className="text-green-600 text-sm hover:underline">← Retour</Link>
+        <Link href="/recettes" className="text-green-600 text-sm hover:underline">← Retour</Link>
       </div>
     )
   }

@@ -95,7 +95,7 @@ function CreerRecetteFlow() {
     return (
       <div className="space-y-6">
         <div className="flex items-center gap-3">
-          <Link href="/" className="text-gray-400 hover:text-gray-600">← Retour</Link>
+          <Link href="/recettes" className="text-gray-400 hover:text-gray-600">← Retour</Link>
           <h2 className="text-xl font-bold text-gray-900">Nouvelle recette</h2>
         </div>
 
@@ -190,7 +190,7 @@ function CreerRecetteFlow() {
     return (
       <div className="space-y-6">
         <div className="flex items-center gap-3">
-          <Link href="/" className="text-gray-400 hover:text-gray-600">← Retour</Link>
+          <Link href="/recettes" className="text-gray-400 hover:text-gray-600">← Retour</Link>
           <h2 className="text-xl font-bold text-gray-900">Nouvelle recette</h2>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">

@@ -2,14 +2,20 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { MealPlanWithRecipes, MealPlanRecipeWithDetails } from '@/types/database'
-import { getMondayOf, addWeeks, toDateString, fromDateString, formatWeekRange, dayLabel, defaultPlannerMonday, isDayInPast } from '@/lib/weeks'
+import { getMondayOf, addWeeks, toDateString, fromDateString, formatWeekRange, dayLabel, isDayInPast } from '@/lib/weeks'
 import RecipePicker from './RecipePicker'
 
 const DAYS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim']
 
 export default function PlannerClient() {
-  const [weekStart, setWeekStart] = useState<Date>(() => defaultPlannerMonday())
+  const searchParams = useSearchParams()
+  // ?week=current → current week (used from the home dashboard).
+  // Otherwise default to NEXT week (bottom-nav tap or direct URL).
+  const [weekStart, setWeekStart] = useState<Date>(() =>
+    searchParams.get('week') === 'current' ? getMondayOf() : addWeeks(getMondayOf(), 1)
+  )
   const [plan, setPlan] = useState<MealPlanWithRecipes | null>(null)
   const [loading, setLoading] = useState(true)
   const [showPicker, setShowPicker] = useState(false)
