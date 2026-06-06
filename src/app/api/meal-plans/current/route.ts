@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
+import { getMondayOf, toDateString } from '@/lib/weeks'
 
 function authClient(request: NextRequest) {
   return createServerClient(
@@ -17,12 +18,9 @@ function adminClient() {
   )
 }
 
+// Current week's Monday, anchored to Amsterdam (see lib/weeks).
 function currentMonday(): string {
-  const d = new Date()
-  const day = d.getUTCDay()
-  const diff = day === 0 ? -6 : 1 - day
-  d.setUTCDate(d.getUTCDate() + diff)
-  return d.toISOString().split('T')[0]
+  return toDateString(getMondayOf())
 }
 
 export async function GET(request: NextRequest) {

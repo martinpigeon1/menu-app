@@ -1,6 +1,21 @@
 // 0=Mon in our model; JS getDay() 0=Sun 1=Mon...6=Sat
 
-export function getMondayOf(date: Date = new Date()): Date {
+// The household is in Amsterdam. We anchor every "today / current week"
+// computation to this timezone so results are identical whether the code runs
+// in the browser (local time) or on the server (UTC on Vercel).
+export const APP_TZ = 'Europe/Amsterdam'
+
+// "Today" as a Date whose local Y/M/D matches the civil date in Amsterdam.
+// Week math below only ever reads the local civil parts (getDay/getDate/…),
+// which are correct for a date built from civil parts in any runtime timezone.
+export function amsterdamToday(): Date {
+  // 'en-CA' formats as YYYY-MM-DD.
+  const s = new Intl.DateTimeFormat('en-CA', { timeZone: APP_TZ }).format(new Date())
+  const [y, m, d] = s.split('-').map(Number)
+  return new Date(y, m - 1, d, 0, 0, 0, 0)
+}
+
+export function getMondayOf(date: Date = amsterdamToday()): Date {
   const d = new Date(date)
   const jsDay = d.getDay() // 0=Sun
   const diff = jsDay === 0 ? -6 : 1 - jsDay
@@ -16,7 +31,7 @@ export function addWeeks(date: Date, n: number): Date {
 }
 
 // Index du jour de la semaine dans notre modèle (0=Lun … 6=Dim) pour une date donnée.
-export function currentDayIndex(date: Date = new Date()): number {
+export function currentDayIndex(date: Date = amsterdamToday()): number {
   const jsDay = date.getDay() // 0=Dim
   return jsDay === 0 ? 6 : jsDay - 1
 }
