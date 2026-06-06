@@ -134,6 +134,17 @@ export default function RecipeDetailPage() {
     router.refresh()
   }
 
+  // Return to wherever the user came from (planner, filtered list, search…).
+  // Fall back to the recipe list when there's no in-app history to go back to
+  // (e.g. the recipe was opened directly via its URL).
+  function goBack() {
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+      router.back()
+    } else {
+      router.push('/')
+    }
+  }
+
   // ---- Unified import ----
   async function runExtract(init: RequestInit) {
     setExtractStep('loading')
@@ -263,7 +274,7 @@ export default function RecipeDetailPage() {
       <div className="space-y-6">
         {/* Navigation */}
         <div className="flex items-center justify-between">
-          <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm">← Retour</Link>
+          <button onClick={goBack} className="text-gray-400 hover:text-gray-600 text-sm">← Retour</button>
           <div className="flex gap-2">
             <button
               onClick={() => setShowPlannerSheet(true)}
