@@ -48,7 +48,8 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
   const [sortBy, setSortBy] = useState<SortKey>('name')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
 
-  const [showBatchImport, setShowBatchImport] = useState(false)
+  const [offerAuto, setOfferAuto] = useState(false)
+  const [runningAuto, setRunningAuto] = useState(false)
   const [showCreateSheet, setShowCreateSheet] = useState(false)
   const [plannerRecipe, setPlannerRecipe] = useState<Recipe | null>(null)
   const [plannerToast, setPlannerToast] = useState(false)
@@ -86,6 +87,12 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
     })
 
   const isFiltered = search !== '' || filterType !== '' || filterAuthor !== '' || minRating !== 0
+
+  // Recipes with a public URL but no ingredients yet — candidates for the
+  // post-TSV auto-fetch (Cookidoo included; it just gets partial treatment).
+  const autoEligible = recipes.filter(
+    (r) => r.source_url?.startsWith('http') && (ingredientCounts[r.id] ?? 0) === 0
+  )
 
   function handleSort(key: SortKey) {
     if (sortBy === key) {
@@ -142,6 +149,7 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
         const msg = `${data.imported} recette(s) importée(s) avec succès.`
         const errMsg = data.errors?.length > 0 ? ` ${data.errors.length} avertissement(s).` : ''
         setImportMessage({ type: 'success', text: msg + errMsg })
+        setOfferAuto(true)
         router.refresh()
       }
     } catch {
@@ -157,6 +165,8 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
     setImportFile(null)
     setPreviewRows([])
     setImportMessage(null)
+    setOfferAuto(false)
+    setRunningAuto(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -166,20 +176,6 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-lg font-semibold text-gray-800">Mes recettes</h2>
         <div className="flex gap-2">
-          <button
-            onClick={() => setShowBatchImport((v) => !v)}
-            className="text-sm px-3 py-1.5 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
-            title="Importer les ingrédients automatiquement depuis les URLs"
-          >
-            🔄 Auto
-          </button>
-          <button
-            onClick={() => { resetImport(); fileInputRef.current?.click() }}
-            disabled={importStep === 'loading' || importStep === 'importing'}
-            className="text-sm px-3 py-1.5 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
-          >
-            {importStep === 'loading' ? 'Lecture...' : importStep === 'importing' ? 'Import...' : 'TSV'}
-          </button>
           <input ref={fileInputRef} type="file" accept=".tsv,.txt,.csv" className="hidden" onChange={handleFileChange} />
           <button
             onClick={() => setShowCreateSheet(true)}
@@ -189,11 +185,6 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
           </button>
         </div>
       </div>
-
-      {/* Batch import */}
-      {showBatchImport && (
-        <BatchIngredientImport recipes={recipes} ingredientCounts={ingredientCounts} onClose={() => setShowBatchImport(false)} />
-      )}
 
       {/* TSV preview */}
       {importStep === 'preview' && (
@@ -243,6 +234,42 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
           {importMessage.text}
           <button onClick={() => setImportMessage(null)} className="ml-2 underline">Fermer</button>
         </div>
+      )}
+
+      {/* Post-TSV: offer to auto-fetch ingredients (+ steps) from URLs */}
+      {offerAuto && !runningAuto && autoEligible.length > 0 && (
+        <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
+          <div>
+            <p className="text-sm font-medium text-gray-800">🔄 Récupérer automatiquement les ingrédients depuis les URLs ?</p>
+            <p className="text-xs text-gray-500 mt-1">
+              Cela analysera les {autoEligible.length} recette{autoEligible.length > 1 ? 's' : ''} avec une URL publique et importera
+              leurs ingrédients via Claude. Les recettes Cookidoo n&apos;auront que les ingrédients (étapes sur le Thermomix).
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setRunningAuto(true)}
+              className="flex-1 bg-green-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-green-700 transition-colors"
+            >
+              Oui, lancer l&apos;import automatique
+            </button>
+            <button
+              onClick={() => setOfferAuto(false)}
+              className="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition-colors"
+            >
+              Non merci
+            </button>
+          </div>
+        </div>
+      )}
+
+      {runningAuto && (
+        <BatchIngredientImport
+          recipes={recipes}
+          ingredientCounts={ingredientCounts}
+          autoStart
+          onClose={() => { setRunningAuto(false); setOfferAuto(false) }}
+        />
       )}
 
       {/* Compact filters */}
@@ -416,7 +443,12 @@ export default function RecipesList({ recipes, authors, ingredientCounts }: Reci
       )}
 
       {/* Create recipe sheet */}
-      {showCreateSheet && <CreateRecipeSheet onClose={() => setShowCreateSheet(false)} />}
+      {showCreateSheet && (
+        <CreateRecipeSheet
+          onClose={() => setShowCreateSheet(false)}
+          onPickTsv={() => { resetImport(); fileInputRef.current?.click() }}
+        />
+      )}
 
       {/* Add to planner sheet */}
       {plannerRecipe && (

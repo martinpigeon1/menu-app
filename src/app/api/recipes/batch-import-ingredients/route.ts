@@ -6,14 +6,15 @@ import { NextRequest, NextResponse } from 'next/server'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
-const SYSTEM_PROMPT = `Tu es un assistant qui extrait les ingrédients d'une recette depuis le contenu d'une page web. Réponds UNIQUEMENT en JSON avec ce format:
-{
-  "default_servings": number,
-  "ingredients": [
-    { "name": string, "quantity": number|null, "unit": string|null }
-  ]
-}
-Déduis le nombre de portions depuis la recette si visible, sinon utilise 4. Normalise les unités: g, kg, ml, l, cl, c.à.s, c.à.c, pincée. Sépare bien chaque ingrédient.`
+const SYSTEM_PROMPT = `Tu es un assistant culinaire. Depuis le contenu d'une page web de recette, extrais:
+- default_servings: nombre de portions (sinon 4)
+- ingredients: [{name, quantity, unit}] (normalise les unités: g, kg, ml, l, cl, c.à.s, c.à.c, pincée)
+- steps: [{step_number, text}] des étapes de la recette
+
+RÈGLE [[ ]] dans les étapes : entoure UNIQUEMENT les quantités d'ingrédients ([[6]] œufs, [[200]]g de chocolat, [[1]] pincée de sel). JAMAIS les temps (6 minutes), vitesses (vitesse 3), températures (60°C, 200°C). En cas de doute, ne pas mettre de placeholder.
+
+Ignore: publicités, navigation, commentaires, suggestions d'autres recettes.
+Réponds UNIQUEMENT en JSON: {"default_servings": number, "ingredients": [...], "steps": [...]}`
 
 function authClient(request: NextRequest) {
   return createServerClient(
@@ -46,11 +47,19 @@ interface EligibleRecipe {
   default_servings: number
 }
 
+interface ProcessResult {
+  ingredientCount: number
+  stepCount: number
+  isCookidoo: boolean
+}
+
 async function processRecipe(
   recipe: EligibleRecipe,
   admin: SupabaseClient,
   signal: AbortSignal
-): Promise<{ count: number }> {
+): Promise<ProcessResult> {
+  const isCookidoo = recipe.source_url.includes('cookidoo')
+
   // Fetch page
   const res = await fetch(recipe.source_url, {
     headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MenuApp/1.0)' },
@@ -60,11 +69,11 @@ async function processRecipe(
   const html = await res.text()
   const pageText = stripHtml(html).slice(0, 20000)
 
-  // Claude extraction
+  // Claude extraction (ingredients + steps)
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
   const msg = await anthropic.messages.create({
     model: 'claude-opus-4-7',
-    max_tokens: 1024,
+    max_tokens: 4096,
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: `Voici le contenu de la page de la recette :\n\n${pageText}` }],
   })
@@ -76,9 +85,12 @@ async function processRecipe(
 
   const ingredients: { name: string; quantity: number | null; unit: string | null }[] = parsed.ingredients ?? []
   const defaultServings: number = parsed.default_servings ?? 4
+  // Cookidoo: ingredients only — the steps stay on Cookidoo / the Thermomix.
+  const steps: { step_number: number; text: string }[] = isCookidoo ? [] : (parsed.steps ?? [])
 
   // Save (service role — no RLS check needed)
   await admin.from('ingredients').delete().eq('recipe_id', recipe.id)
+  await admin.from('recipe_steps').delete().eq('recipe_id', recipe.id)
   await admin.from('recipes').update({ default_servings: defaultServings }).eq('id', recipe.id)
 
   if (ingredients.length > 0) {
@@ -93,7 +105,17 @@ async function processRecipe(
     if (error) throw new Error(`DB: ${error.message}`)
   }
 
-  return { count: ingredients.length }
+  if (steps.length > 0) {
+    const rows = steps.map((step, i) => ({
+      recipe_id: recipe.id,
+      step_number: step.step_number ?? i + 1,
+      text: step.text,
+    }))
+    const { error } = await admin.from('recipe_steps').insert(rows)
+    if (error) throw new Error(`DB: ${error.message}`)
+  }
+
+  return { ingredientCount: ingredients.length, stepCount: steps.length, isCookidoo }
 }
 
 export async function POST(request: NextRequest) {
@@ -110,7 +132,7 @@ export async function POST(request: NextRequest) {
     .single()
   if (!member) return NextResponse.json({ error: 'Foyer introuvable' }, { status: 403 })
 
-  // Find candidates: any public URL
+  // Find candidates: any public URL (Cookidoo included — it just gets partial treatment)
   const { data: candidates } = await admin
     .from('recipes')
     .select('id, name, source_url, default_servings')
@@ -122,7 +144,7 @@ export async function POST(request: NextRequest) {
     const stream = new ReadableStream({
       start(controller) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'init', total: 0, recipes: [] })}\n\n`))
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'complete', total: 0, success: 0, errors: 0 })}\n\n`))
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'complete', total: 0, success: 0, errors: 0, complete: 0, partial: 0 })}\n\n`))
         controller.close()
       },
     })
@@ -153,29 +175,41 @@ export async function POST(request: NextRequest) {
 
       let successCount = 0
       let errorCount = 0
+      let completeCount = 0
+      let partialCount = 0
 
       for (const recipe of eligible) {
         send({ type: 'progress', recipe_id: recipe.id, recipe_name: recipe.name, status: 'running' })
 
         const abort = new AbortController()
-        const timer = setTimeout(() => abort.abort(), 15000)
+        const timer = setTimeout(() => abort.abort(), 20000)
 
         try {
           const result = await processRecipe(recipe, admin, abort.signal)
           clearTimeout(timer)
-          send({ type: 'progress', recipe_id: recipe.id, recipe_name: recipe.name, status: 'success', ingredient_count: result.count })
+          send({
+            type: 'progress',
+            recipe_id: recipe.id,
+            recipe_name: recipe.name,
+            status: 'success',
+            ingredient_count: result.ingredientCount,
+            step_count: result.stepCount,
+            is_cookidoo: result.isCookidoo,
+          })
           successCount++
+          if (result.isCookidoo) partialCount++
+          else completeCount++
         } catch (e) {
           clearTimeout(timer)
           const msg = abort.signal.aborted
-            ? 'Timeout (15s)'
+            ? 'Timeout (20s)'
             : e instanceof Error ? e.message : 'Erreur inconnue'
           send({ type: 'progress', recipe_id: recipe.id, recipe_name: recipe.name, status: 'error', error: msg })
           errorCount++
         }
       }
 
-      send({ type: 'complete', total: eligible.length, success: successCount, errors: errorCount })
+      send({ type: 'complete', total: eligible.length, success: successCount, errors: errorCount, complete: completeCount, partial: partialCount })
       controller.close()
     },
   })

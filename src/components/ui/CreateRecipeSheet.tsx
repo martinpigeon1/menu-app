@@ -4,12 +4,19 @@ import { useRouter } from 'next/navigation'
 
 interface CreateRecipeSheetProps {
   onClose: () => void
+  onPickTsv: () => void
 }
 
-export default function CreateRecipeSheet({ onClose }: CreateRecipeSheetProps) {
+type Option = {
+  icon: string
+  label: string
+  desc: string
+} & ({ href: string } | { action: () => void })
+
+export default function CreateRecipeSheet({ onClose, onPickTsv }: CreateRecipeSheetProps) {
   const router = useRouter()
 
-  const options = [
+  const options: Option[] = [
     {
       icon: '📷',
       label: 'Depuis une photo',
@@ -21,6 +28,12 @@ export default function CreateRecipeSheet({ onClose }: CreateRecipeSheetProps) {
       label: 'Depuis une URL',
       desc: 'Yummix, Claire au Matcha, Cookidoo…',
       href: '/recettes/creer?mode=url',
+    },
+    {
+      icon: '📋',
+      label: 'Depuis un fichier TSV',
+      desc: 'Importer une liste de recettes',
+      action: () => { onClose(); onPickTsv() },
     },
     {
       icon: '✏️',
@@ -46,8 +59,8 @@ export default function CreateRecipeSheet({ onClose }: CreateRecipeSheetProps) {
 
         {options.map((opt) => (
           <button
-            key={opt.href}
-            onClick={() => router.push(opt.href)}
+            key={opt.label}
+            onClick={() => ('href' in opt ? router.push(opt.href) : opt.action())}
             className="w-full flex items-center gap-3 px-4 py-3 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors text-left"
           >
             <span className="text-2xl">{opt.icon}</span>

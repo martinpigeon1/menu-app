@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Recipe } from '@/types/database'
 
@@ -9,6 +9,8 @@ interface RecipeProgress {
   name: string
   status: 'pending' | 'running' | 'success' | 'error'
   ingredient_count?: number
+  step_count?: number
+  is_cookidoo?: boolean
   error?: string
 }
 
@@ -18,17 +20,21 @@ interface BatchIngredientImportProps {
   recipes: Recipe[]
   ingredientCounts: Record<string, number>
   onClose: () => void
+  /** Start importing immediately on mount (used after a TSV import). */
+  autoStart?: boolean
 }
 
-export default function BatchIngredientImport({ recipes, ingredientCounts, onClose }: BatchIngredientImportProps) {
+export default function BatchIngredientImport({ recipes, ingredientCounts, onClose, autoStart = false }: BatchIngredientImportProps) {
   const router = useRouter()
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null)
 
-  const [phase, setPhase] = useState<Phase>('idle')
+  const [phase, setPhase] = useState<Phase>(autoStart ? 'running' : 'idle')
   const [items, setItems] = useState<RecipeProgress[]>([])
   const [total, setTotal] = useState(0)
   const [successCount, setSuccessCount] = useState(0)
   const [errorCount, setErrorCount] = useState(0)
+  const [completeCount, setCompleteCount] = useState(0)
+  const [partialCount, setPartialCount] = useState(0)
 
   // Client-side eligible count (for preview before starting)
   const eligibleCount = recipes.filter(
@@ -44,6 +50,8 @@ export default function BatchIngredientImport({ recipes, ingredientCounts, onClo
     setItems([])
     setSuccessCount(0)
     setErrorCount(0)
+    setCompleteCount(0)
+    setPartialCount(0)
 
     try {
       const res = await fetch('/api/recipes/batch-import-ingredients', { method: 'POST' })
@@ -59,6 +67,8 @@ export default function BatchIngredientImport({ recipes, ingredientCounts, onClo
       let done = false
       let localSuccess = 0
       let localErrors = 0
+      let localComplete = 0
+      let localPartial = 0
 
       while (!done) {
         const { value, done: streamDone } = await reader.read()
@@ -84,9 +94,16 @@ export default function BatchIngredientImport({ recipes, ingredientCounts, onClo
               if (event.status === 'running') {
                 updateItem(event.recipe_id, { status: 'running' })
               } else if (event.status === 'success') {
-                updateItem(event.recipe_id, { status: 'success', ingredient_count: event.ingredient_count })
+                updateItem(event.recipe_id, {
+                  status: 'success',
+                  ingredient_count: event.ingredient_count,
+                  step_count: event.step_count,
+                  is_cookidoo: event.is_cookidoo,
+                })
                 localSuccess++
                 setSuccessCount(localSuccess)
+                if (event.is_cookidoo) { localPartial++; setPartialCount(localPartial) }
+                else { localComplete++; setCompleteCount(localComplete) }
               } else if (event.status === 'error') {
                 updateItem(event.recipe_id, { status: 'error', error: event.error })
                 localErrors++
@@ -96,6 +113,8 @@ export default function BatchIngredientImport({ recipes, ingredientCounts, onClo
               setTotal(event.total)
               setSuccessCount(event.success)
               setErrorCount(event.errors)
+              setCompleteCount(event.complete ?? localComplete)
+              setPartialCount(event.partial ?? localPartial)
               setPhase('done')
               router.refresh()
             }
@@ -109,11 +128,15 @@ export default function BatchIngredientImport({ recipes, ingredientCounts, onClo
     }
   }
 
+  useEffect(() => {
+    if (autoStart) startImport()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   function retry() {
     startImport()
   }
 
-  const errorIds = new Set(items.filter((i) => i.status === 'error').map((i) => i.id))
   const doneCount = items.filter((i) => i.status === 'success' || i.status === 'error').length
   const progress = total > 0 ? Math.round((doneCount / total) * 100) : 0
 
@@ -127,7 +150,7 @@ export default function BatchIngredientImport({ recipes, ingredientCounts, onClo
         )}
       </div>
 
-      {/* IDLE */}
+      {/* IDLE (only when not auto-started) */}
       {phase === 'idle' && (
         <div className="space-y-3">
           {eligibleCount === 0 ? (
@@ -139,7 +162,6 @@ export default function BatchIngredientImport({ recipes, ingredientCounts, onClo
               <p className="text-sm text-gray-600">
                 <span className="font-semibold text-green-700">{eligibleCount} recette{eligibleCount > 1 ? 's' : ''}</span> avec URL publique sans ingrédients.
               </p>
-              <p className="text-xs text-gray-400">Claude va extraire les ingrédients automatiquement depuis chaque page. Comptez ~15s par recette.</p>
               <button
                 onClick={startImport}
                 className="w-full bg-green-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-green-700 transition-colors"
@@ -185,10 +207,18 @@ export default function BatchIngredientImport({ recipes, ingredientCounts, onClo
                     {item.name}
                   </span>
                   {item.status === 'success' && item.ingredient_count !== undefined && (
-                    <span className="text-gray-400 text-xs ml-1">— {item.ingredient_count} ingrédient{item.ingredient_count !== 1 ? 's' : ''}</span>
+                    item.is_cookidoo ? (
+                      <span className="text-gray-400 text-xs ml-1">
+                        — {item.ingredient_count} ingrédient{item.ingredient_count !== 1 ? 's' : ''} (Cookidoo · étapes sur Thermomix)
+                      </span>
+                    ) : (
+                      <span className="text-gray-400 text-xs ml-1">
+                        — {item.ingredient_count} ingrédient{item.ingredient_count !== 1 ? 's' : ''} + {item.step_count ?? 0} étape{(item.step_count ?? 0) !== 1 ? 's' : ''}
+                      </span>
+                    )
                   )}
-                  {item.status === 'error' && item.error && (
-                    <p className="text-xs text-red-500 mt-0.5">{item.error}</p>
+                  {item.status === 'error' && (
+                    <span className="text-red-500 text-xs ml-1">— erreur{item.error ? ` : ${item.error}` : ''}</span>
                   )}
                 </div>
               </div>
@@ -201,12 +231,24 @@ export default function BatchIngredientImport({ recipes, ingredientCounts, onClo
           {/* Done summary */}
           {phase === 'done' && (
             <div className="space-y-2 pt-1 border-t border-gray-100">
-              <p className="text-sm font-medium text-gray-800">
-                {successCount > 0 && <span className="text-green-700">{successCount} importée{successCount > 1 ? 's' : ''}</span>}
-                {successCount > 0 && errorCount > 0 && <span className="text-gray-400">, </span>}
-                {errorCount > 0 && <span className="text-red-600">{errorCount} erreur{errorCount > 1 ? 's' : ''}</span>}
-                {successCount === 0 && errorCount === 0 && <span className="text-gray-500">Aucune recette éligible.</span>}
-              </p>
+              <div className="text-sm space-y-0.5">
+                {completeCount > 0 && (
+                  <p className="text-green-700 font-medium">
+                    {completeCount} import{completeCount > 1 ? 's' : ''} complet{completeCount > 1 ? 's' : ''} (ingrédients + étapes)
+                  </p>
+                )}
+                {partialCount > 0 && (
+                  <p className="text-amber-600 font-medium">
+                    {partialCount} import{partialCount > 1 ? 's' : ''} partiel{partialCount > 1 ? 's' : ''} (ingrédients uniquement · Cookidoo)
+                  </p>
+                )}
+                {errorCount > 0 && (
+                  <p className="text-red-600 font-medium">{errorCount} erreur{errorCount > 1 ? 's' : ''}</p>
+                )}
+                {successCount === 0 && errorCount === 0 && (
+                  <p className="text-gray-500">Aucune recette éligible.</p>
+                )}
+              </div>
               <div className="flex gap-2">
                 {errorCount > 0 && (
                   <button
