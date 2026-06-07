@@ -29,16 +29,21 @@ const CATEGORIES = [
   'Autre',
 ] as const
 
-const PERIOD_DAYS: Record<string, number[]> = {
-  week:    [0, 1, 2, 3, 4], // Mon–Fri
-  weekend: [5, 6],           // Sat–Sun
+interface MprRow {
+  servings: number
+  recipe: {
+    name: string
+    default_servings: number
+    ingredients: { name: string; quantity: number | null; unit: string | null }[]
+  } | null
+  meal_plan: { household_id: string } | null
 }
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id: planId } = await params
+  await params // plan id no longer scopes the query — a selection can span weeks
   const supabase = authClient(request)
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non authentifié' }, { status: 401 })
@@ -52,34 +57,24 @@ export async function GET(
     .single()
   if (!member) return NextResponse.json({ error: 'Foyer introuvable' }, { status: 403 })
 
-  const { data: plan } = await admin
-    .from('meal_plans')
-    .select('id')
-    .eq('id', planId)
-    .eq('household_id', member.household_id)
-    .single()
-  if (!plan) return NextResponse.json({ error: 'Plan introuvable' }, { status: 404 })
-
-  const period = request.nextUrl.searchParams.get('period') ?? 'week'
-  const allowedDays = PERIOD_DAYS[period]
-
-  // For 'all' period: fetch every recipe with a day assigned (both week + weekend)
-  // Used to compute the shared Placard category
-  let mprQuery = admin
-    .from('meal_plan_recipes')
-    .select(`*, recipe:recipe_id(name, default_servings, ingredients(*))`)
-    .eq('meal_plan_id', planId)
-
-  if (period === 'all') {
-    // All days that are set (null excluded automatically by .in)
-    mprQuery = mprQuery.in('day_of_week', [0, 1, 2, 3, 4, 5, 6])
-  } else if (allowedDays) {
-    mprQuery = mprQuery.in('day_of_week', allowedDays)
+  // Aggregate ingredients only from the selected meal_plan_recipe ids.
+  const idsParam = request.nextUrl.searchParams.get('recipe_ids') ?? ''
+  const ids = idsParam.split(',').map((s) => s.trim()).filter(Boolean)
+  if (ids.length === 0) {
+    return NextResponse.json({ categories: [], missing_recipes: [] })
   }
 
-  const { data: mprs } = await mprQuery
+  const { data: rawMprs } = await admin
+    .from('meal_plan_recipes')
+    .select(`servings, recipe:recipe_id(name, default_servings, ingredients(*)), meal_plan:meal_plan_id(household_id)`)
+    .in('id', ids)
 
-  if (!mprs || mprs.length === 0) {
+  // Security: only meals belonging to the user's household.
+  const mprs = ((rawMprs ?? []) as unknown as MprRow[]).filter(
+    (m) => m.meal_plan?.household_id === member.household_id
+  )
+
+  if (mprs.length === 0) {
     return NextResponse.json({ categories: [], missing_recipes: [] })
   }
 
@@ -88,15 +83,11 @@ export async function GET(
   const missing_recipes: string[] = []
 
   for (const mpr of mprs) {
-    const recipe = mpr.recipe as {
-      name: string
-      default_servings: number
-      ingredients: { name: string; quantity: number | null; unit: string | null }[]
-    }
+    const recipe = mpr.recipe
     const ingredients = recipe?.ingredients ?? []
 
-    if (ingredients.length === 0) {
-      missing_recipes.push(recipe.name)
+    if (!recipe || ingredients.length === 0) {
+      if (recipe) missing_recipes.push(recipe.name)
       continue
     }
 

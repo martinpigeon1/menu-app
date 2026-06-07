@@ -2,14 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { MealPlanWithRecipes, MealPlanRecipeWithDetails } from '@/types/database'
 import { getMondayOf, addWeeks, toDateString, fromDateString, formatWeekRange, dayLabel, isDayInPast } from '@/lib/weeks'
+import { saveSelection } from '@/lib/shoppingSelection'
 import RecipePicker from './RecipePicker'
+import DayPickerModal from '@/components/ui/DayPickerModal'
 
 const DAYS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim']
 
 export default function PlannerClient() {
+  const router = useRouter()
   const searchParams = useSearchParams()
   // ?week=current → current week (used from the home dashboard).
   // Otherwise default to NEXT week (bottom-nav tap or direct URL).
@@ -17,6 +20,7 @@ export default function PlannerClient() {
     searchParams.get('week') === 'current' ? getMondayOf() : addWeeks(getMondayOf(), 1)
   )
   const [plan, setPlan] = useState<MealPlanWithRecipes | null>(null)
+  const [showDayPicker, setShowDayPicker] = useState(false)
   const [loading, setLoading] = useState(true)
   const [showPicker, setShowPicker] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -213,12 +217,12 @@ export default function PlannerClient() {
           </button>
 
           {hasRecipes && plan && (
-            <Link
-              href={`/planner/shopping-list?week=${weekParam}`}
+            <button
+              onClick={() => setShowDayPicker(true)}
               className="bg-white border border-gray-200 text-gray-800 font-medium text-sm px-4 py-3 rounded-xl shadow-md hover:bg-gray-50 transition-colors"
             >
-              🛒 Voir la liste de courses
-            </Link>
+              🛒 Créer ma liste de courses
+            </button>
           )}
         </div>
       </div>
@@ -228,6 +232,17 @@ export default function PlannerClient() {
           planId={plan.id}
           onAdd={handleRecipeAdded}
           onClose={() => setShowPicker(false)}
+        />
+      )}
+
+      {showDayPicker && (
+        <DayPickerModal
+          onClose={() => setShowDayPicker(false)}
+          onConfirm={(sel) => {
+            saveSelection(sel)
+            setShowDayPicker(false)
+            router.push('/planner/shopping-list')
+          }}
         />
       )}
 

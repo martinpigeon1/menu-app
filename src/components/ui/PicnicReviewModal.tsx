@@ -24,7 +24,7 @@ interface EditableReview {
 
 interface PicnicReviewModalProps {
   ingredients: ShoppingItem[]
-  period: 'week' | 'weekend'
+  period: string
   onClose: () => void
 }
 
