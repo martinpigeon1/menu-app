@@ -1,7 +1,7 @@
 'use client'
 
 import { Suspense, useEffect, useRef, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { ChefMessage, Recipe } from '@/types/database'
 import ChefRecipeChip from '@/components/ui/ChefRecipeChip'
@@ -29,6 +29,7 @@ const CHIPS: { label: string; message: string }[] = [
 ]
 
 function ChefChat() {
+  const router = useRouter()
   const searchParams = useSearchParams()
   const [messages, setMessages] = useState<ChefMessage[]>([])
   const [recipeMap, setRecipeMap] = useState<Map<string, Recipe>>(new Map())
@@ -147,14 +148,17 @@ function ChefChat() {
       <div className="fixed inset-x-0 top-14 bottom-16 z-10 flex flex-col">
         <div className="max-w-2xl mx-auto w-full h-full flex flex-col bg-gray-50">
           {/* Sub-header */}
-          <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-gray-200">
-            <div>
-              <h2 className="font-semibold text-gray-900 leading-tight">💬 Chef</h2>
-              {week && <p className="text-[11px] text-gray-400 leading-tight">{weekLabel(week)}</p>}
-            </div>
+          <div className="flex items-center justify-between gap-2 px-3 py-2 bg-white border-b border-gray-200">
+            <button
+              onClick={() => router.back()}
+              className="text-xs text-gray-500 hover:text-gray-800 font-medium whitespace-nowrap"
+            >
+              ← Retour au Planner
+            </button>
+            {week && <span className="text-[11px] text-gray-400 truncate">{weekLabel(week)}</span>}
             <button
               onClick={handleReset}
-              className="text-xs text-gray-500 hover:text-red-500 font-medium px-2.5 py-1.5 rounded-lg border border-gray-200 hover:bg-red-50 transition-colors"
+              className="text-xs text-gray-500 hover:text-red-500 font-medium px-2.5 py-1.5 rounded-lg border border-gray-200 hover:bg-red-50 transition-colors whitespace-nowrap"
             >
               🗑 Recommencer
             </button>

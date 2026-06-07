@@ -1,22 +1,48 @@
-// Tableau de bord (accueil) — vue de la semaine + accès rapide au Chef
+// Tableau de bord (accueil) — prochains repas, favoris, accès au Chef
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { getMondayOf, toDateString, formatWeekRange } from '@/lib/weeks'
+import { amsterdamToday, getMondayOf, addWeeks, toDateString, fromDateString } from '@/lib/weeks'
+import { Recipe } from '@/types/database'
 import OnboardingForm from './OnboardingForm'
+import FavoritesRow from '@/components/ui/FavoritesRow'
 
-const DAYS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim']
-
-const QUICK_CHIPS: { label: string; q: string }[] = [
-  { label: '🥦 Végétarien', q: 'Propose-moi des plats végétariens.' },
-  { label: '⏱ Rapide', q: 'Je voudrais quelque chose de rapide, moins de 30 minutes.' },
-  { label: '🐟 Poisson', q: 'Propose-moi des recettes de poisson.' },
+const FR_WEEKDAYS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche']
+const FR_MONTHS = [
+  'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+  'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre',
 ]
 
-interface PlanRecipeRow {
-  day_of_week: number | null
-  sort_order: number
-  recipe: { name: string } | null
+const CHEF_CHIPS: { label: string; q: string }[] = [
+  { label: '🥦 Végétarien ce soir', q: 'Je voudrais quelque chose de végétarien ce soir.' },
+  { label: '⏱ Quelque chose de rapide', q: 'Je voudrais quelque chose de rapide ce soir.' },
+  { label: "🐟 On n'a pas eu de poisson cette semaine", q: "On n'a pas eu de poisson cette semaine, propose-moi une recette de poisson." },
+]
+
+interface PlanRow {
+  week_start: string
+  meal_plan_recipes: {
+    day_of_week: number | null
+    recipe: { id: string; name: string; author: string | null } | null
+  }[]
+}
+
+interface UpcomingMeal {
+  date: Date
+  id: string
+  name: string
+  author: string | null
+}
+
+function sameDay(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+}
+
+function dayLabel(date: Date, today: Date, tomorrow: Date): string {
+  if (sameDay(date, today)) return "Aujourd'hui"
+  if (sameDay(date, tomorrow)) return 'Demain'
+  const weekday = FR_WEEKDAYS[(date.getDay() + 6) % 7] // JS 0=Sun → our 6
+  return `${weekday} ${date.getDate()} ${FR_MONTHS[date.getMonth()]}`
 }
 
 export default async function HomePage() {
@@ -48,90 +74,147 @@ export default async function HomePage() {
     )
   }
 
-  const monday = getMondayOf()
-  const weekStr = toDateString(monday)
+  const hid = householdMember.household_id
+  // Include the previous week so a meal from "yesterday" (a Sunday) is still
+  // caught when today is a Monday.
+  const prevMonday = toDateString(addWeeks(getMondayOf(), -1))
 
-  const { data: plan } = await supabase
-    .from('meal_plans')
-    .select('week_start, meal_plan_recipes(day_of_week, sort_order, recipe:recipe_id(name))')
-    .eq('household_id', householdMember.household_id)
-    .eq('week_start', weekStr)
-    .maybeSingle()
+  const [plansRes, favRes, countRes] = await Promise.all([
+    supabase
+      .from('meal_plans')
+      .select('week_start, meal_plan_recipes(day_of_week, recipe:recipe_id(id, name, author))')
+      .eq('household_id', hid)
+      .gte('week_start', prevMonday),
+    supabase
+      .from('recipes')
+      .select('*')
+      .eq('household_id', hid)
+      .gte('rating', 4.5)
+      .order('rating', { ascending: false })
+      .limit(8),
+    supabase
+      .from('recipes')
+      .select('id', { count: 'exact', head: true })
+      .eq('household_id', hid),
+  ])
 
-  const rows = (plan?.meal_plan_recipes ?? []) as unknown as PlanRecipeRow[]
-  const sorted = [...rows].sort((a, b) => a.sort_order - b.sort_order)
-  const byDay: string[][] = Array.from({ length: 7 }, () => [])
-  for (const r of sorted) {
-    if (r.recipe && r.day_of_week !== null && r.day_of_week >= 0 && r.day_of_week <= 6) {
-      byDay[r.day_of_week].push(r.recipe.name)
+  const favorites = (favRes.data ?? []) as Recipe[]
+  const totalRecipes = countRes.count ?? 0
+
+  // Build the upcoming-meals list (assigned day >= yesterday, chronological).
+  const today = amsterdamToday()
+  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1)
+  const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1)
+
+  const meals: UpcomingMeal[] = []
+  for (const plan of (plansRes.data ?? []) as unknown as PlanRow[]) {
+    const base = fromDateString(plan.week_start)
+    for (const mpr of plan.meal_plan_recipes ?? []) {
+      if (mpr.day_of_week === null || !mpr.recipe) continue
+      const date = new Date(base)
+      date.setDate(base.getDate() + mpr.day_of_week)
+      if (date >= yesterday) {
+        meals.push({ date, id: mpr.recipe.id, name: mpr.recipe.name, author: mpr.recipe.author })
+      }
     }
   }
-  const totalPlanned = byDay.reduce((n, arr) => n + arr.length, 0)
+  meals.sort((a, b) => a.date.getTime() - b.date.getTime())
+  const upcoming = meals.slice(0, 4)
 
   return (
-    <div className="space-y-5">
-      {/* Section A — Aperçu de la semaine */}
-      <Link
-        href="/planner?week=current"
-        className="block bg-white rounded-2xl border border-gray-200 p-4 hover:border-green-200 hover:shadow-sm transition-all"
-      >
-        <div className="flex items-center justify-between mb-3">
-          <p className="font-semibold text-gray-900 text-sm">
-            Cette semaine · <span className="text-gray-500 font-normal">{formatWeekRange(monday)}</span>
-          </p>
-          <span className="text-gray-300 text-lg leading-none">›</span>
-        </div>
-
-        {totalPlanned === 0 ? (
-          <p className="text-sm text-gray-400">Aucun repas planifié · <span className="text-green-600">Ajouter →</span></p>
+    <div className="space-y-7">
+      {/* SECTION 1 — Mes prochains repas */}
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold text-gray-800">Mes prochains repas</h2>
+        {upcoming.length === 0 ? (
+          <div className="bg-white border border-gray-200 rounded-xl p-5 text-center space-y-3">
+            <p className="text-sm text-gray-500">📅 Rien de planifié pour l&apos;instant</p>
+            <Link
+              href="/planner"
+              className="inline-block text-sm font-medium text-green-600 hover:text-green-700"
+            >
+              Ajouter des recettes à ma semaine →
+            </Link>
+          </div>
         ) : (
-          <div className="grid grid-cols-7 gap-1">
-            {DAYS.map((label, d) => {
-              const names = byDay[d]
-              const weekend = d >= 5
-              return (
-                <div
-                  key={d}
-                  className={`rounded-lg px-1 py-1.5 min-w-0 ${weekend ? 'bg-amber-50' : 'bg-gray-50'}`}
-                >
-                  <p className={`text-[10px] font-medium text-center mb-0.5 ${weekend ? 'text-amber-600' : 'text-gray-400'}`}>
-                    {label}
+          <div className="space-y-2">
+            {upcoming.map((meal, i) => (
+              <Link
+                key={`${meal.id}-${i}`}
+                href={`/recettes/${meal.id}`}
+                className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl px-4 py-3 hover:border-green-200 hover:shadow-sm transition-all"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-medium text-green-600 uppercase tracking-wide">
+                    {dayLabel(meal.date, today, tomorrow)}
                   </p>
-                  <p className="text-[11px] text-gray-700 text-center truncate leading-tight">
-                    {names[0] ?? '—'}
-                  </p>
-                  {names.length > 1 && (
-                    <p className="text-[10px] text-gray-400 text-center leading-tight">+{names.length - 1}</p>
-                  )}
+                  <p className="text-sm font-semibold text-gray-900 truncate">{meal.name}</p>
+                  {meal.author && <p className="text-xs text-gray-400 truncate">{meal.author}</p>}
                 </div>
-              )
-            })}
+                <span className="text-gray-300 text-lg leading-none shrink-0">›</span>
+              </Link>
+            ))}
           </div>
         )}
-      </Link>
+      </section>
 
-      {/* Section B — Accès rapide au Chef */}
-      <div className="space-y-2">
-        <Link
-          href="/chef"
-          className="flex items-center gap-2 bg-white rounded-2xl border border-gray-200 px-4 py-3 hover:border-green-200 hover:shadow-sm transition-all"
-        >
-          <span className="text-lg">💬</span>
-          <span className="text-sm text-gray-400">Qu&apos;est-ce qu&apos;on mange ce soir ?</span>
-        </Link>
+      {/* SECTION 2 — Mes favoris */}
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold text-gray-800">Mes favoris</h2>
+        {favorites.length > 0 ? (
+          <FavoritesRow favorites={favorites} />
+        ) : (
+          <div className="bg-white border border-gray-200 rounded-xl p-5 text-center space-y-3">
+            {totalRecipes === 0 ? (
+              <>
+                <p className="text-sm text-gray-500">Vous n&apos;avez pas encore de recettes</p>
+                <Link href="/recettes" className="inline-block text-sm font-medium text-green-600 hover:text-green-700">
+                  Ajouter mes premières recettes →
+                </Link>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-gray-500">Notez vos recettes pour les retrouver ici</p>
+                <Link href="/recettes" className="inline-block text-sm font-medium text-green-600 hover:text-green-700">
+                  Voir mes recettes →
+                </Link>
+              </>
+            )}
+          </div>
+        )}
+      </section>
 
-        <div className="flex gap-2 overflow-x-auto no-scrollbar">
-          {QUICK_CHIPS.map((chip) => (
-            <Link
-              key={chip.label}
-              href={`/chef?q=${encodeURIComponent(chip.q)}`}
-              className="flex-shrink-0 text-xs px-3 py-1.5 rounded-full border border-gray-200 text-gray-700 bg-white hover:bg-gray-50 transition-colors whitespace-nowrap"
-            >
-              {chip.label}
-            </Link>
-          ))}
+      {/* SECTION 3 — Le Chef */}
+      <section className="space-y-3">
+        <div className="bg-white border border-gray-200 rounded-2xl p-5 space-y-4">
+          <div>
+            <h2 className="font-semibold text-gray-900">💬 Votre assistant menu</h2>
+            <p className="text-sm text-gray-500 mt-1">
+              Dites-lui ce que vous avez au frigo, vos envies du soir, vos contraintes —
+              il connaît vos {totalRecipes} recette{totalRecipes !== 1 ? 's' : ''} et votre historique.
+            </p>
+          </div>
+
+          <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-5 px-5">
+            {CHEF_CHIPS.map((chip) => (
+              <Link
+                key={chip.label}
+                href={`/chef?q=${encodeURIComponent(chip.q)}`}
+                className="flex-shrink-0 text-xs px-3 py-1.5 rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors whitespace-nowrap"
+              >
+                {chip.label}
+              </Link>
+            ))}
+          </div>
+
+          <Link
+            href="/chef"
+            className="block text-center bg-green-600 text-white py-2.5 rounded-xl text-sm font-semibold hover:bg-green-700 transition-colors"
+          >
+            Ouvrir le Chef →
+          </Link>
         </div>
-      </div>
+      </section>
     </div>
   )
 }
