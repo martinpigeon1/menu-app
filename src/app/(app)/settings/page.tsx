@@ -21,6 +21,68 @@ export default function SettingsPage() {
   const [twoFAStep, setTwoFAStep] = useState(false)
   const [code, setCode] = useState('')
 
+  // One-time backfill of missing prep/cook times. Hidden once done (localStorage)
+  // or when no recipe is eligible.
+  const [backfillDone, setBackfillDone] = useState(true)
+  const [backfillCount, setBackfillCount] = useState(0)
+  const [backfillPhase, setBackfillPhase] = useState<'idle' | 'running' | 'done'>('idle')
+  const [backfillProgress, setBackfillProgress] = useState({ done: 0, total: 0, success: 0 })
+
+  useEffect(() => {
+    if (localStorage.getItem('backfill_times_done') === 'true') return
+    setBackfillDone(false)
+    fetch('/api/recipes/batch-backfill-times')
+      .then((r) => r.json())
+      .then((d) => setBackfillCount(d.count ?? 0))
+      .catch(() => setBackfillCount(0))
+  }, [])
+
+  async function runBackfill() {
+    setBackfillPhase('running')
+    setBackfillProgress({ done: 0, total: backfillCount, success: 0 })
+    try {
+      const res = await fetch('/api/recipes/batch-backfill-times', { method: 'POST' })
+      if (!res.ok || !res.body) { setBackfillPhase('idle'); return }
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let streamDone = false
+      let total = 0
+      let doneCount = 0
+      let success = 0
+
+      while (!streamDone) {
+        const { value, done } = await reader.read()
+        streamDone = done
+        if (value) buffer += decoder.decode(value, { stream: !streamDone })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const ev = JSON.parse(line.slice(6))
+            if (ev.type === 'init') {
+              total = ev.total
+              setBackfillProgress((p) => ({ ...p, total }))
+            } else if (ev.type === 'progress' && (ev.status === 'success' || ev.status === 'error')) {
+              doneCount++
+              if (ev.status === 'success') success++
+              setBackfillProgress({ done: doneCount, total, success })
+            } else if (ev.type === 'complete') {
+              setBackfillProgress({ done: ev.total, total: ev.total, success: ev.success })
+            }
+          } catch {}
+        }
+      }
+
+      localStorage.setItem('backfill_times_done', 'true')
+      setBackfillPhase('done')
+    } catch {
+      setBackfillPhase('idle')
+    }
+  }
+
   async function fetchStatus() {
     setLoading(true)
     try {
@@ -231,6 +293,36 @@ export default function SettingsPage() {
           </form>
         )}
       </section>
+
+      {/* One-time prep/cook time backfill — low prominence, auto-hides when done */}
+      {!backfillDone && backfillCount > 0 && (
+        <section className="pt-1">
+          {backfillPhase === 'idle' && (
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-gray-400">
+                {backfillCount} recette{backfillCount > 1 ? 's' : ''} avec URL sans temps de préparation
+              </p>
+              <button
+                onClick={runBackfill}
+                className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors"
+              >
+                ⏱ Compléter les temps de préparation
+              </button>
+            </div>
+          )}
+          {backfillPhase === 'running' && (
+            <div className="flex items-center gap-2 text-xs text-gray-500">
+              <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
+              Analyse des recettes… {backfillProgress.done}/{backfillProgress.total}
+            </div>
+          )}
+          {backfillPhase === 'done' && (
+            <p className="text-xs text-green-600">
+              ✅ Temps complétés ({backfillProgress.success} recette{backfillProgress.success > 1 ? 's' : ''})
+            </p>
+          )}
+        </section>
+      )}
     </div>
   )
 }
