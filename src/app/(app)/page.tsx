@@ -85,12 +85,14 @@ export default async function HomePage() {
       .select('week_start, meal_plan_recipes(day_of_week, recipe:recipe_id(id, name, author))')
       .eq('household_id', hid)
       .gte('week_start', prevMonday),
+    // Top recipes by rating (NULLs last), filled with the most recent unrated
+    // recipes — so the section is never empty when the household has recipes.
     supabase
       .from('recipes')
       .select('*')
       .eq('household_id', hid)
-      .gte('rating', 4.5)
-      .order('rating', { ascending: false })
+      .order('rating', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false })
       .limit(8),
     supabase
       .from('recipes')
@@ -165,21 +167,10 @@ export default async function HomePage() {
           <FavoritesRow favorites={favorites} />
         ) : (
           <div className="bg-white border border-gray-200 rounded-xl p-5 text-center space-y-3">
-            {totalRecipes === 0 ? (
-              <>
-                <p className="text-sm text-gray-500">Vous n&apos;avez pas encore de recettes</p>
-                <Link href="/recettes" className="inline-block text-sm font-medium text-green-600 hover:text-green-700">
-                  Ajouter mes premières recettes →
-                </Link>
-              </>
-            ) : (
-              <>
-                <p className="text-sm text-gray-500">Notez vos recettes pour les retrouver ici</p>
-                <Link href="/recettes" className="inline-block text-sm font-medium text-green-600 hover:text-green-700">
-                  Voir mes recettes →
-                </Link>
-              </>
-            )}
+            <p className="text-sm text-gray-500">Vous n&apos;avez pas encore de recettes</p>
+            <Link href="/recettes" className="inline-block text-sm font-medium text-green-600 hover:text-green-700">
+              Ajouter mes premières recettes →
+            </Link>
           </div>
         )}
       </section>
