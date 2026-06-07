@@ -141,6 +141,14 @@ export default function PlannerClient() {
   const weekParam = toDateString(weekStart)
   const isCurrentWeek = toDateString(getMondayOf()) === weekParam
 
+  // Single flat list: assigned days first (chronological), unassigned last.
+  const sortedRecipes = [...recipes].sort((a, b) => {
+    const av = a.day_of_week ?? 99
+    const bv = b.day_of_week ?? 99
+    if (av !== bv) return av - bv
+    return a.sort_order - b.sort_order
+  })
+
   return (
     <div className="space-y-4">
       {/* Week header */}
@@ -157,6 +165,16 @@ export default function PlannerClient() {
         </button>
       </div>
 
+      {/* Primary action — create the shopping list */}
+      {hasRecipes && plan && (
+        <button
+          onClick={() => setShowDayPicker(true)}
+          className="w-full flex items-center justify-center gap-2 bg-white border border-green-600 text-green-700 font-medium text-sm py-2.5 rounded-lg hover:bg-green-50 transition-colors"
+        >
+          🛒 Créer ma liste de courses
+        </button>
+      )}
+
       {error && (
         <div className="px-4 py-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg">{error}</div>
       )}
@@ -165,67 +183,39 @@ export default function PlannerClient() {
         <div className="flex justify-center py-16">
           <div className="w-8 h-8 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
         </div>
-      ) : recipes.length === 0 ? (
-        <div className="text-center py-16 text-gray-400">
-          <div className="text-5xl mb-3">📅</div>
-          <p className="font-medium text-gray-600">Aucune recette cette semaine</p>
-          <p className="text-sm mt-1">Ajoutez-en avec le bouton + ci-dessous</p>
-        </div>
       ) : (
-        <div className="space-y-5">
-          <RecipeSection
-            title="Semaine · Lun → Ven"
-            items={recipes.filter((m) => m.day_of_week !== null && m.day_of_week <= 4)}
-            onRemove={removeRecipe}
-            onServingsChange={changeServings}
-            onDayChange={assignDay}
-            onMoveToNextWeek={moveToNextWeek}
-            currentWeek={isCurrentWeek}
-          />
-          <RecipeSection
-            title="Week-end · Sam → Dim"
-            items={recipes.filter((m) => m.day_of_week !== null && m.day_of_week >= 5)}
-            onRemove={removeRecipe}
-            onServingsChange={changeServings}
-            onDayChange={assignDay}
-            onMoveToNextWeek={moveToNextWeek}
-            currentWeek={isCurrentWeek}
-          />
-          <RecipeSection
-            title="Sans jour assigné"
-            items={recipes.filter((m) => m.day_of_week === null)}
-            onRemove={removeRecipe}
-            onServingsChange={changeServings}
-            onDayChange={assignDay}
-            onMoveToNextWeek={moveToNextWeek}
-            currentWeek={isCurrentWeek}
-            warn
-          />
-        </div>
-      )}
+        <div className="space-y-3">
+          {recipes.length === 0 ? (
+            <div className="bg-white border border-gray-200 rounded-xl p-8 text-center">
+              <div className="text-4xl mb-2">📅</div>
+              <p className="font-medium text-gray-600">Aucun repas planifié cette semaine</p>
+              <p className="text-sm text-gray-400 mt-1">Ajoutez vos premiers repas ci-dessous</p>
+            </div>
+          ) : (
+            sortedRecipes.map((mpr) => (
+              <MealPlanCard
+                key={mpr.id}
+                mpr={mpr}
+                onRemove={() => removeRecipe(mpr.id)}
+                onServingsChange={(delta) => changeServings(mpr.id, delta)}
+                onDayChange={(day) => assignDay(mpr.id, day)}
+                onMoveToNextWeek={(day) => moveToNextWeek(mpr, day)}
+                currentWeek={isCurrentWeek}
+              />
+            ))
+          )}
 
-      {/* Bottom bar */}
-      <div className="fixed bottom-16 inset-x-0 z-10 pointer-events-none">
-        <div className="max-w-2xl mx-auto px-4 flex justify-between items-center pointer-events-auto">
-          {/* FAB */}
-          <button
-            onClick={() => setShowPicker(true)}
-            className="w-14 h-14 bg-green-600 text-white rounded-full shadow-lg hover:bg-green-700 transition-colors text-2xl font-light flex items-center justify-center"
-            aria-label="Ajouter une recette"
-          >
-            +
-          </button>
-
-          {hasRecipes && plan && (
+          {/* Add a meal */}
+          {plan && (
             <button
-              onClick={() => setShowDayPicker(true)}
-              className="bg-white border border-gray-200 text-gray-800 font-medium text-sm px-4 py-3 rounded-xl shadow-md hover:bg-gray-50 transition-colors"
+              onClick={() => setShowPicker(true)}
+              className="w-full py-4 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 text-sm font-medium hover:border-green-400 hover:text-green-600 transition-colors"
             >
-              🛒 Créer ma liste de courses
+              + Ajouter un repas
             </button>
           )}
         </div>
-      </div>
+      )}
 
       {showPicker && plan && (
         <RecipePicker
@@ -357,39 +347,3 @@ function MealPlanCard({ mpr, onRemove, onServingsChange, onDayChange, onMoveToNe
   )
 }
 
-interface RecipeSectionProps {
-  title: string
-  items: MealPlanRecipeWithDetails[]
-  onRemove: (id: string) => void
-  onServingsChange: (id: string, delta: number) => void
-  onDayChange: (id: string, day: number | null) => void
-  onMoveToNextWeek: (mpr: MealPlanRecipeWithDetails, day: number) => void
-  currentWeek: boolean
-  warn?: boolean
-}
-
-function RecipeSection({ title, items, onRemove, onServingsChange, onDayChange, onMoveToNextWeek, currentWeek, warn }: RecipeSectionProps) {
-  if (items.length === 0) return null
-  return (
-    <div>
-      <div className={`flex items-center gap-2 mb-2 ${warn ? 'text-amber-600' : 'text-gray-500'}`}>
-        <div className={`flex-1 h-px ${warn ? 'bg-amber-200' : 'bg-gray-200'}`} />
-        <span className="text-xs font-semibold uppercase tracking-wide whitespace-nowrap">{title}</span>
-        <div className={`flex-1 h-px ${warn ? 'bg-amber-200' : 'bg-gray-200'}`} />
-      </div>
-      <div className="space-y-3">
-        {items.map((mpr) => (
-          <MealPlanCard
-            key={mpr.id}
-            mpr={mpr}
-            onRemove={() => onRemove(mpr.id)}
-            onServingsChange={(delta) => onServingsChange(mpr.id, delta)}
-            onDayChange={(day) => onDayChange(mpr.id, day)}
-            onMoveToNextWeek={(day) => onMoveToNextWeek(mpr, day)}
-            currentWeek={currentWeek}
-          />
-        ))}
-      </div>
-    </div>
-  )
-}

@@ -9,13 +9,14 @@ export default function PlannerPage() {
         <PlannerClient />
       </Suspense>
 
-      {/* Chef FAB — centered pill, above the "liste de courses" bar and the nav */}
+      {/* Chef FAB — small round button, bottom-right above the nav */}
       <Link
         href="/chef"
-        className="fixed bottom-32 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-green-600 text-white rounded-full shadow-lg py-3 px-6 text-sm font-medium hover:bg-green-700 transition-colors whitespace-nowrap"
+        aria-label="Chef"
+        title="Chef"
+        className="fixed bottom-20 right-4 z-30 w-12 h-12 flex items-center justify-center bg-green-600 text-white text-xl rounded-full shadow-lg hover:bg-green-700 transition-colors"
       >
-        <span className="text-lg leading-none">💬</span>
-        Chef · Votre assistant menu
+        💬
       </Link>
     </>
   )
