@@ -60,17 +60,14 @@ export async function GET(
   // Aggregate ingredients only from the selected meal_plan_recipe ids.
   const idsParam = request.nextUrl.searchParams.get('recipe_ids') ?? ''
   const ids = idsParam.split(',').map((s) => s.trim()).filter(Boolean)
-  console.log('[shopping-list] recipe_ids received:', ids)
   if (ids.length === 0) {
-    console.log('[shopping-list] EARLY RETURN: no recipe_ids in query')
     return NextResponse.json({ categories: [], missing_recipes: [] })
   }
 
-  const { data: rawMprs, error: mprErr } = await admin
+  const { data: rawMprs } = await admin
     .from('meal_plan_recipes')
     .select('servings, meal_plan_id, recipe:recipe_id(name, default_servings, ingredients(*))')
     .in('id', ids)
-  console.log('[shopping-list] rawMprs error:', mprErr?.message ?? null, '| rawMprs count:', rawMprs?.length ?? 0)
 
   // Security: keep only meals that belong to one of this household's plans.
   const { data: householdPlans } = await admin
@@ -79,14 +76,9 @@ export async function GET(
     .eq('household_id', member.household_id)
   const planIds = new Set((householdPlans ?? []).map((p) => p.id as string))
 
-  const typedMprs = (rawMprs ?? []) as unknown as MprRow[]
-  console.log('[shopping-list] household planIds count:', planIds.size, '| rawMprs meal_plan_ids:', typedMprs.map((m) => m.meal_plan_id))
-
-  const mprs = typedMprs.filter((m) => planIds.has(m.meal_plan_id))
-  console.log('[shopping-list] mprs after household filter:', mprs.length)
+  const mprs = ((rawMprs ?? []) as unknown as MprRow[]).filter((m) => planIds.has(m.meal_plan_id))
 
   if (mprs.length === 0) {
-    console.log('[shopping-list] EARLY RETURN: no mprs after household filter')
     return NextResponse.json({ categories: [], missing_recipes: [] })
   }
 
@@ -120,11 +112,8 @@ export async function GET(
   }
 
   const aggregated = Array.from(map.values())
-  console.log('[shopping-list] ingredients found:', aggregated.length, '| missing_recipes:', missing_recipes)
-  console.log('[shopping-list] claude categorization input:', JSON.stringify(aggregated))
 
   if (aggregated.length === 0) {
-    console.log('[shopping-list] EARLY RETURN: aggregated ingredients empty')
     return NextResponse.json({ categories: [], missing_recipes })
   }
 
@@ -155,15 +144,11 @@ Conserve exactement les valeurs quantity et unit fournies. Regroupe les ingrédi
     })
 
     const text = msg.content[0].type === 'text' ? msg.content[0].text : '[]'
-    console.log('[shopping-list] claude raw text:', text)
     const jsonMatch = text.match(/\[[\s\S]*\]/)
     if (jsonMatch) categories = JSON.parse(jsonMatch[0])
-    console.log('[shopping-list] claude categorization output:', JSON.stringify(categories))
-  } catch (e) {
-    console.log('[shopping-list] claude error — falling back to "Autre":', e instanceof Error ? e.message : e)
+  } catch {
     categories = [{ category: 'Autre', ingredients: aggregated }]
   }
 
-  console.log('[shopping-list] final response categories:', categories.map((c) => c.category))
   return NextResponse.json({ categories, missing_recipes })
 }
