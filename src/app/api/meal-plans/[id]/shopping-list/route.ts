@@ -31,12 +31,12 @@ const CATEGORIES = [
 
 interface MprRow {
   servings: number
+  meal_plan_id: string
   recipe: {
     name: string
     default_servings: number
     ingredients: { name: string; quantity: number | null; unit: string | null }[]
   } | null
-  meal_plan: { household_id: string } | null
 }
 
 export async function GET(
@@ -66,13 +66,17 @@ export async function GET(
 
   const { data: rawMprs } = await admin
     .from('meal_plan_recipes')
-    .select(`servings, recipe:recipe_id(name, default_servings, ingredients(*)), meal_plan:meal_plan_id(household_id)`)
+    .select('servings, meal_plan_id, recipe:recipe_id(name, default_servings, ingredients(*))')
     .in('id', ids)
 
-  // Security: only meals belonging to the user's household.
-  const mprs = ((rawMprs ?? []) as unknown as MprRow[]).filter(
-    (m) => m.meal_plan?.household_id === member.household_id
-  )
+  // Security: keep only meals that belong to one of this household's plans.
+  const { data: householdPlans } = await admin
+    .from('meal_plans')
+    .select('id')
+    .eq('household_id', member.household_id)
+  const planIds = new Set((householdPlans ?? []).map((p) => p.id as string))
+
+  const mprs = ((rawMprs ?? []) as unknown as MprRow[]).filter((m) => planIds.has(m.meal_plan_id))
 
   if (mprs.length === 0) {
     return NextResponse.json({ categories: [], missing_recipes: [] })
