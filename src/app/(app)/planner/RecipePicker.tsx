@@ -7,12 +7,12 @@ import { Recipe, RecipeType } from '@/types/database'
 const RECIPE_TYPES: RecipeType[] = ['Plat', 'Salade', 'Soupe', 'Entrée', 'Accompagnement', 'Dessert']
 
 interface RecipePickerProps {
-  planId: string
-  onAdd: (mpr: Record<string, unknown>) => void
+  onSelect: (recipe: Recipe) => Promise<void> | void
   onClose: () => void
+  title?: string
 }
 
-export default function RecipePicker({ planId, onAdd, onClose }: RecipePickerProps) {
+export default function RecipePicker({ onSelect, onClose, title }: RecipePickerProps) {
   const [recipes, setRecipes] = useState<Recipe[]>([])
   const [ingredientCounts, setIngredientCounts] = useState<Record<string, number>>({})
   const [search, setSearch] = useState('')
@@ -66,13 +66,7 @@ export default function RecipePicker({ planId, onAdd, onClose }: RecipePickerPro
   async function handleAdd(recipe: Recipe) {
     setAdding(recipe.id)
     try {
-      const res = await fetch(`/api/meal-plans/${planId}/recipes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recipe_id: recipe.id, servings: recipe.default_servings || 4 }),
-      })
-      const data = await res.json()
-      if (res.ok) onAdd(data)
+      await onSelect(recipe)
     } finally {
       setAdding(null)
     }
@@ -82,7 +76,7 @@ export default function RecipePicker({ planId, onAdd, onClose }: RecipePickerPro
     <div className="fixed inset-0 z-50 flex flex-col bg-white sm:items-end">
       <div className="flex flex-col h-full sm:h-auto sm:max-h-[90vh] sm:w-full sm:max-w-lg sm:rounded-t-2xl bg-white sm:mt-auto overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 flex-shrink-0">
-          <h3 className="font-semibold text-gray-900">Ajouter une recette</h3>
+          <h3 className="font-semibold text-gray-900">{title ?? 'Ajouter une recette'}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
         </div>
 

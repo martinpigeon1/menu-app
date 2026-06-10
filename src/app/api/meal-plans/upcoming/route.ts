@@ -19,13 +19,29 @@ function adminClient() {
 }
 
 interface PlanRow {
+  id: string
   week_start: string
   meal_plan_recipes: {
     id: string
+    recipe_id: string
     day_of_week: number | null
     sort_order: number
-    recipe: { name: string } | null
+    servings: number
+    recipe: { name: string; author: string | null } | null
   }[]
+}
+
+interface UpcomingMeal {
+  id: string
+  recipe_id: string
+  name: string
+  author: string | null
+  servings: number
+  day_of_week: number
+  date: string
+  week_start: string
+  meal_plan_id: string
+  sort_order: number
 }
 
 // Upcoming planned meals across all weeks (from yesterday onward), one entry per
@@ -51,11 +67,11 @@ export async function GET(request: NextRequest) {
 
   const { data: plans } = await admin
     .from('meal_plans')
-    .select('week_start, meal_plan_recipes(id, day_of_week, sort_order, recipe:recipe_id(name))')
+    .select('id, week_start, meal_plan_recipes(id, recipe_id, day_of_week, sort_order, servings, recipe:recipe_id(name, author))')
     .eq('household_id', member.household_id)
     .gte('week_start', prevMonday)
 
-  const meals: { id: string; name: string; date: string; sort_order: number }[] = []
+  const meals: UpcomingMeal[] = []
   for (const plan of (plans ?? []) as unknown as PlanRow[]) {
     const base = fromDateString(plan.week_start)
     for (const mpr of plan.meal_plan_recipes ?? []) {
@@ -64,12 +80,23 @@ export async function GET(request: NextRequest) {
       d.setDate(base.getDate() + mpr.day_of_week)
       const date = toDateString(d)
       if (date >= yesterdayStr) {
-        meals.push({ id: mpr.id, name: mpr.recipe.name, date, sort_order: mpr.sort_order })
+        meals.push({
+          id: mpr.id,
+          recipe_id: mpr.recipe_id,
+          name: mpr.recipe.name,
+          author: mpr.recipe.author,
+          servings: mpr.servings,
+          day_of_week: mpr.day_of_week,
+          date,
+          week_start: plan.week_start,
+          meal_plan_id: plan.id,
+          sort_order: mpr.sort_order,
+        })
       }
     }
   }
 
   meals.sort((a, b) => (a.date === b.date ? a.sort_order - b.sort_order : a.date.localeCompare(b.date)))
 
-  return NextResponse.json({ meals: meals.map(({ id, name, date }) => ({ id, name, date })) })
+  return NextResponse.json({ meals })
 }
