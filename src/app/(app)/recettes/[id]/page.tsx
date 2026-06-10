@@ -10,6 +10,7 @@ import StarRating from '@/components/ui/StarRating'
 import RecipeExtractPreview, { ExtractResult, ReviewedRecipe } from '@/components/ui/RecipeExtractPreview'
 import StepText from '@/components/ui/StepText'
 import AddToPlannerSheet from '@/components/ui/AddToPlannerSheet'
+import RecipeIngredientsEditor from '@/components/ui/RecipeIngredientsEditor'
 
 const TYPES: RecipeType[] = ['Plat', 'Salade', 'Soupe', 'Entrée', 'Accompagnement', 'Dessert']
 
@@ -233,11 +234,6 @@ export default function RecipeDetailPage() {
     }
   }
 
-  function formatQuantity(q: number | null) {
-    if (q === null) return ''
-    return q % 1 === 0 ? q.toString() : q.toString()
-  }
-
   if (loading) {
     return <div className="text-center py-12 text-gray-500 text-sm">Chargement…</div>
   }
@@ -437,25 +433,12 @@ export default function RecipeDetailPage() {
               {/* Ingrédients */}
               <div>
                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Ingrédients</p>
-                {ingredients.length === 0 ? (
-                  <p className="text-sm text-gray-400">Aucun ingrédient. Utilisez « Importer » ci-dessus.</p>
-                ) : (
-                  <div>
-                    <p className="text-xs text-gray-400 mb-2">Pour {recipe.default_servings} personne{recipe.default_servings > 1 ? 's' : ''}</p>
-                    <ul className="space-y-1">
-                      {ingredients.map((ing) => (
-                        <li key={ing.id} className="text-sm text-gray-700 flex gap-2">
-                          {(ing.quantity !== null || ing.unit) && (
-                            <span className="text-gray-500 shrink-0">
-                              {formatQuantity(ing.quantity)}{ing.unit ? ` ${ing.unit}` : ''}
-                            </span>
-                          )}
-                          <span>{ing.name}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                <RecipeIngredientsEditor
+                  recipeId={id}
+                  ingredients={ingredients}
+                  defaultServings={recipe.default_servings}
+                  onChange={setIngredients}
+                />
               </div>
 
               {/* Instructions */}
