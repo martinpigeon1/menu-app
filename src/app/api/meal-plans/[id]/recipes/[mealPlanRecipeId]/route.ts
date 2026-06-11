@@ -32,13 +32,31 @@ async function verifyAccess(request: NextRequest, planId: string) {
 
   const { data: plan } = await admin
     .from('meal_plans')
-    .select('id')
+    .select('id, week_start')
     .eq('id', planId)
     .eq('household_id', member.household_id)
     .single()
   if (!plan) return null
 
-  return admin
+  return { admin, householdId: member.household_id as string, planWeekStart: plan.week_start as string }
+}
+
+async function findOrCreatePlan(admin: ReturnType<typeof adminClient>, householdId: string, weekStart: string): Promise<string> {
+  const { data: found } = await admin
+    .from('meal_plans')
+    .select('id')
+    .eq('household_id', householdId)
+    .eq('week_start', weekStart)
+    .maybeSingle()
+  if (found) return found.id as string
+
+  const { data: created, error } = await admin
+    .from('meal_plans')
+    .insert({ household_id: householdId, week_start: weekStart })
+    .select('id')
+    .single()
+  if (error || !created) throw new Error(error?.message ?? 'Création du plan échouée')
+  return created.id as string
 }
 
 export async function DELETE(
@@ -46,10 +64,10 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; mealPlanRecipeId: string }> }
 ) {
   const { id: planId, mealPlanRecipeId } = await params
-  const admin = await verifyAccess(request, planId)
-  if (!admin) return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
+  const ctx = await verifyAccess(request, planId)
+  if (!ctx) return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
 
-  const { error } = await admin
+  const { error } = await ctx.admin
     .from('meal_plan_recipes')
     .delete()
     .eq('id', mealPlanRecipeId)
@@ -64,14 +82,24 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string; mealPlanRecipeId: string }> }
 ) {
   const { id: planId, mealPlanRecipeId } = await params
-  const admin = await verifyAccess(request, planId)
-  if (!admin) return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
+  const ctx = await verifyAccess(request, planId)
+  if (!ctx) return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
+  const { admin } = ctx
 
   const body = await request.json()
   const updates: Record<string, unknown> = {}
   if (body.servings !== undefined) updates.servings = body.servings
   if (body.day_of_week !== undefined) updates.day_of_week = body.day_of_week
   if (body.meal_type !== undefined) updates.meal_type = body.meal_type
+
+  // Cross-week move: relocate the recipe to another week's plan (find/create it).
+  if (body.target_week_start && body.target_week_start !== ctx.planWeekStart) {
+    try {
+      updates.meal_plan_id = await findOrCreatePlan(admin, ctx.householdId, body.target_week_start)
+    } catch (e) {
+      return NextResponse.json({ error: e instanceof Error ? e.message : 'Erreur' }, { status: 500 })
+    }
+  }
 
   const { data, error } = await admin
     .from('meal_plan_recipes')

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Recipe } from '@/types/database'
-import { amsterdamToday, getMondayOf, addWeeks, toDateString, fromDateString } from '@/lib/weeks'
+import { amsterdamToday, getMondayOf, addWeeks, toDateString, fromDateString, isDayInPast } from '@/lib/weeks'
 import { saveSelection } from '@/lib/shoppingSelection'
 import RecipePicker from './RecipePicker'
 import DayPickerModal from '@/components/ui/DayPickerModal'
@@ -56,6 +56,8 @@ export default function PlannerClient() {
   const [pickerDate, setPickerDate] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [showDayPicker, setShowDayPicker] = useState(false)
+  const [movingId, setMovingId] = useState<string | null>(null)
+  const [errorToast, setErrorToast] = useState<string | null>(null)
 
   const servingsTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
@@ -175,14 +177,38 @@ export default function PlannerClient() {
     servingsTimers.current.set(meal.id, timer)
   }
 
-  async function assignDay(meal: PlannerMeal, newDow: number) {
-    const newDate = addDaysStr(meal.week_start, newDow)
-    setMeals((prev) => prev.map((m) => (m.id === meal.id ? { ...m, day_of_week: newDow, date: newDate } : m)))
-    await fetch(`/api/meal-plans/${meal.meal_plan_id}/recipes/${meal.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ day_of_week: newDow }),
-    }).catch(() => {})
+  // Move a meal to another day — and to next week if a past day was picked on
+  // the current week. Optimistic, with revert + toast on failure.
+  async function moveMeal(meal: PlannerMeal, newDow: number) {
+    if (movingId) return
+    const toNextWeek = meal.week_start === thisMonday && isDayInPast(newDow)
+    const targetWeekStart = toNextWeek ? nextMonday : meal.week_start
+    if (newDow === meal.day_of_week && targetWeekStart === meal.week_start) return
+
+    const newDate = addDaysStr(targetWeekStart, newDow)
+    const prevMeals = meals
+    setMovingId(meal.id)
+    setMeals((prev) => prev.map((m) => (m.id === meal.id ? { ...m, day_of_week: newDow, week_start: targetWeekStart, date: newDate } : m)))
+
+    try {
+      const res = await fetch(`/api/meal-plans/${meal.meal_plan_id}/recipes/${meal.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ day_of_week: newDow, target_week_start: targetWeekStart }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Déplacement échoué')
+      // A cross-week move reassigns meal_plan_id — sync it from the response.
+      if (data.meal_plan_id) {
+        setMeals((prev) => prev.map((m) => (m.id === meal.id ? { ...m, meal_plan_id: data.meal_plan_id } : m)))
+      }
+    } catch (e) {
+      setMeals(prevMeals)
+      setErrorToast(e instanceof Error ? e.message : 'Erreur')
+      setTimeout(() => setErrorToast(null), 2500)
+    } finally {
+      setMovingId(null)
+    }
   }
 
   function openPickerForDay(dateStr: string) {
@@ -238,8 +264,9 @@ export default function PlannerClient() {
                       <ul className="border-t border-gray-50">
                         {dayMeals.map((meal) => {
                           const expanded = expandedId === meal.id
+                          const moving = movingId === meal.id
                           return (
-                            <li key={meal.id} className="border-b border-gray-50 last:border-b-0">
+                            <li key={meal.id} className={`border-b border-gray-50 last:border-b-0 transition-opacity ${moving ? 'opacity-50' : ''}`}>
                               <div className="flex items-center gap-2 px-4 py-2.5">
                                 <span className="text-gray-300 shrink-0">·</span>
                                 <Link
@@ -248,6 +275,9 @@ export default function PlannerClient() {
                                 >
                                   {meal.name}
                                 </Link>
+                                {moving && (
+                                  <span className="shrink-0 w-3.5 h-3.5 border-2 border-green-500 border-t-transparent rounded-full animate-spin" />
+                                )}
                                 <button
                                   onClick={() => setExpandedId(expanded ? null : meal.id)}
                                   className="ml-auto text-xs text-gray-400 hover:text-gray-600 whitespace-nowrap"
@@ -276,19 +306,27 @@ export default function PlannerClient() {
                                         className="w-8 h-8 rounded-lg border border-gray-200 text-gray-700 flex items-center justify-center hover:bg-white transition-colors">+</button>
                                     </div>
                                   </div>
-                                  {/* Day chips */}
+                                  {/* Day chips — all 7 days; past days on the current week move to next week */}
                                   <div className="flex gap-1 overflow-x-auto pb-0.5 no-scrollbar">
                                     {FR_WD_SHORT.map((label, i) => {
                                       const active = meal.day_of_week === i
+                                      const past = meal.week_start === thisMonday && !active && isDayInPast(i)
                                       return (
                                         <button
                                           key={i}
-                                          onClick={() => assignDay(meal, i)}
-                                          className={`shrink-0 px-2.5 py-1 rounded-2xl text-xs font-medium border transition-colors ${
-                                            active ? 'bg-green-600 text-white border-green-600' : 'border-gray-200 text-gray-500 hover:border-green-300'
+                                          onClick={() => moveMeal(meal, i)}
+                                          disabled={moving}
+                                          title={past ? 'Jour passé — déplace à la semaine prochaine' : undefined}
+                                          className={`shrink-0 flex flex-col items-center px-2.5 py-1 rounded-2xl text-xs font-medium border transition-colors disabled:opacity-50 ${
+                                            active
+                                              ? 'bg-green-600 text-white border-green-600'
+                                              : past
+                                              ? 'border-dashed border-gray-200 text-gray-400 hover:border-green-300'
+                                              : 'border-gray-200 text-gray-500 hover:border-green-300'
                                           }`}
                                         >
-                                          {label}
+                                          <span>{label}</span>
+                                          {past && <span className="text-[8px] leading-none text-amber-500">→ sem.</span>}
                                         </button>
                                       )
                                     })}
@@ -337,6 +375,15 @@ export default function PlannerClient() {
             router.push('/planner/shopping-list')
           }}
         />
+      )}
+
+      {/* Move error toast */}
+      {errorToast && (
+        <div className="fixed bottom-24 inset-x-0 flex justify-center z-50 pointer-events-none">
+          <div className="bg-gray-900 text-white text-sm font-medium px-4 py-2.5 rounded-xl shadow-lg">
+            ⚠️ {errorToast}
+          </div>
+        </div>
       )}
     </div>
   )
