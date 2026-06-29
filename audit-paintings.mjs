@@ -43,14 +43,23 @@ function shuffle(arr) {
 
 async function run() {
   // 1. Récupère TOUTES les lignes (titre, artiste, année, mouvement, source)
-  //    Pour 1283 lignes c'est largement gérable en une seule requête.
-  const { data, error } = await supabase
-    .from("paintings")
-    .select("title, artist, year, movement_fr, source");
+  //    Supabase/PostgREST plafonne une requête à 1000 lignes par défaut :
+  //    on pagine avec .range() pour ne pas tronquer la table.
+  const PAGE = 1000;
+  const data = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data: page, error } = await supabase
+      .from("paintings")
+      .select("title, artist, year, movement_fr, source")
+      .order("id", { ascending: true })
+      .range(from, from + PAGE - 1);
 
-  if (error) {
-    console.error("❌ Erreur de lecture Supabase:", error.message);
-    process.exit(1);
+    if (error) {
+      console.error("❌ Erreur de lecture Supabase:", error.message);
+      process.exit(1);
+    }
+    data.push(...page);
+    if (page.length < PAGE) break;
   }
 
   console.log(`📦 ${data.length} œuvres au total dans la table.\n`);
