@@ -10,3 +10,24 @@
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* Painting game (/peintures) — arcade-ish reveal & score animations. */
+@keyframes pg-pop {
+  0% { transform: scale(0.6); opacity: 0; }
+  60% { transform: scale(1.12); }
+  100% { transform: scale(1); opacity: 1; }
+}
+.pg-pop { animation: pg-pop 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.3) both; }
+
+@keyframes pg-bump {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.35); color: #ffe08a; }
+  100% { transform: scale(1); }
+}
+.pg-bump { animation: pg-bump 0.4s ease-out both; }
+
+@keyframes pg-reveal {
+  0% { transform: scale(0.85) translateY(8px); opacity: 0; }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+.pg-reveal { animation: pg-reveal 0.28s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }

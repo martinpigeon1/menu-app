@@ -2,9 +2,9 @@
 
 // Jeu « Devine le mouvement » — gameplay côté client.
 // Partie chronométrée de 3 minutes, flux continu de tableaux. Pour chaque
-// tableau le joueur devine : le mouvement (obligatoire), la décennie via une
-// roue à défilement (obligatoire), et l'artiste (facultatif). Le but est
-// d'éduquer l'œil à reconnaître style et époque, pas de mémoriser des titres.
+// tableau : le mouvement (réponse instantanée — un mauvais choix fait passer
+// au suivant), puis la décennie via deux roues (siècle + décennie) à inertie,
+// et enfin l'artiste (facultatif, double les points). But : éduquer l'œil.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Leaderboard from './Leaderboard'
@@ -12,10 +12,10 @@ import type { Painting } from './page'
 
 // ── Règles du jeu ───────────────────────────────────────────────────────────
 const GAME_SECONDS = 180 // chrono global, en continu (pas de pause)
-const FLASH_MS = 1500 // durée de la révélation avant enchaînement auto
+const FLASH_MS = 3500 // révélation laissée à l'écran pour avoir le temps d'apprendre
 const MOVEMENT_POINTS = 100
-const DECADE_EXACT = 50
-const DECADE_ADJACENT = 25
+const DECADE_EXACT = 100
+const DECADE_ADJACENT = 50
 const STREAK_STEP = 0.1 // +10 % par tableau de série déjà accumulé, non plafonné
 
 // ── Utilitaires ─────────────────────────────────────────────────────────────
@@ -59,12 +59,14 @@ function artistMatches(guess: string, answer: string): boolean {
 }
 
 type Phase = 'intro' | 'playing' | 'done'
+type MovementResult = 'pending' | 'correct' | 'wrong'
 type DecadeKind = 'exact' | 'adjacent' | 'miss'
 type Flash = {
+  won: boolean
   total: number
-  movementCorrect: boolean
   decadeKind: DecadeKind
   artistDoubled: boolean
+  streakAfter: number
   correctMovement: string
   correctDecade: number
   artist: string
@@ -81,23 +83,24 @@ export default function PaintingGame({
 }) {
   const [phase, setPhase] = useState<Phase>('intro')
 
-  // File de tableaux mélangée une fois par partie (le catalogue est bien plus
-  // grand que ce qu'on peut voir en 3 min : pas de répétition en pratique).
+  // File de tableaux mélangée une fois par partie.
   const [queue, setQueue] = useState<Painting[]>([])
   const [qi, setQi] = useState(0)
   const current = queue.length ? queue[qi % queue.length] : undefined
 
   // Réponses du tour courant.
   const [pickedMovement, setPickedMovement] = useState<string | null>(null)
-  const [pickedDecade, setPickedDecade] = useState<number | null>(null)
+  const [movementResult, setMovementResult] = useState<MovementResult>('pending')
+  const [pickedCentury, setPickedCentury] = useState<number | null>(null)
+  const [pickedDigit, setPickedDigit] = useState<number | null>(null)
   const [artistGuess, setArtistGuess] = useState('')
   const [imgBroken, setImgBroken] = useState(false)
 
   // Scores & séries.
   const [score, setScore] = useState(0)
-  const [streak, setStreak] = useState(0) // série de mouvements corrects consécutifs
+  const [streak, setStreak] = useState(0)
   const [bestStreak, setBestStreak] = useState(0)
-  const [seen, setSeen] = useState(0) // tableaux validés ou passés
+  const [seen, setSeen] = useState(0)
   const [flash, setFlash] = useState<Flash | null>(null)
 
   // Classement.
@@ -107,24 +110,27 @@ export default function PaintingGame({
   const [saved, setSaved] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
-  // Chrono : on mémorise l'instant de fin et on rafraîchit l'affichage.
+  // Chrono.
   const endRef = useRef<number>(0)
   const [remainingMs, setRemainingMs] = useState(GAME_SECONDS * 1000)
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Décennies disponibles, dérivées du catalogue (bornes réelles).
-  const decades = useMemo(() => {
-    if (!paintings.length) return []
+  // Bornes du catalogue → roue des siècles.
+  const centuries = useMemo(() => {
     let min = Infinity
     let max = -Infinity
     for (const p of paintings) {
       if (p.year < min) min = p.year
       if (p.year > max) max = p.year
     }
-    const out: number[] = []
-    for (let d = decadeOf(min); d <= decadeOf(max); d += 10) out.push(d)
-    return out
+    const cs: number[] = []
+    for (let c = Math.floor(min / 100) * 100; c <= Math.floor(max / 100) * 100; c += 100) cs.push(c)
+    return cs
   }, [paintings])
+  const digits = useMemo(() => [0, 10, 20, 30, 40, 50, 60, 70, 80, 90], [])
+
+  const pickedDecade =
+    pickedCentury !== null && pickedDigit !== null ? pickedCentury + pickedDigit : null
 
   // Options de mouvement : bonne réponse + 5 distracteurs, par tableau.
   const movementOptions = useMemo(() => {
@@ -140,7 +146,6 @@ export default function PaintingGame({
     setPhase('done')
   }, [])
 
-  // Boucle du chrono.
   useEffect(() => {
     if (phase !== 'playing') return
     const tick = () => {
@@ -152,7 +157,6 @@ export default function PaintingGame({
     return () => clearInterval(id)
   }, [phase, finish])
 
-  // Nettoyage du timer de flash.
   useEffect(() => {
     return () => {
       if (flashTimer.current) clearTimeout(flashTimer.current)
@@ -161,7 +165,9 @@ export default function PaintingGame({
 
   function resetTurn() {
     setPickedMovement(null)
-    setPickedDecade(null)
+    setMovementResult('pending')
+    setPickedCentury(null)
+    setPickedDigit(null)
     setArtistGuess('')
     setImgBroken(false)
     setFlash(null)
@@ -183,20 +189,59 @@ export default function PaintingGame({
     setPhase('playing')
   }
 
-  // Passe au tableau suivant (sans toucher au score ni à la série).
   const drawNext = useCallback(() => {
     setQi((i) => i + 1)
     resetTurn()
   }, [])
 
+  function armFlash(f: Flash) {
+    setFlash(f)
+    flashTimer.current = setTimeout(() => {
+      flashTimer.current = null
+      drawNext()
+    }, FLASH_MS)
+  }
+
+  // Avance immédiatement (clic « Continuer » / sur le voile).
+  function advanceNow() {
+    if (!flash) return
+    if (flashTimer.current) clearTimeout(flashTimer.current)
+    flashTimer.current = null
+    drawNext()
+  }
+
+  // Sélection d'un mouvement : retour instantané. Faux → on passe au suivant.
+  function pickMovement(m: string) {
+    if (!current || flash || movementResult !== 'pending') return
+    setPickedMovement(m)
+    if (m === current.movement_fr) {
+      setMovementResult('correct') // on débloque les roues + artiste
+      return
+    }
+    // Mauvais mouvement : 0 point, série cassée, on enchaîne.
+    setMovementResult('wrong')
+    setStreak(0)
+    setSeen((n) => n + 1)
+    armFlash({
+      won: false,
+      total: 0,
+      decadeKind: 'miss',
+      artistDoubled: false,
+      streakAfter: 0,
+      correctMovement: current.movement_fr,
+      correctDecade: decadeOf(current.year),
+      artist: current.artist,
+      year: current.year,
+      title: current.title,
+    })
+  }
+
+  // Validation de la décennie (le mouvement est déjà confirmé correct).
   function validate() {
-    if (!current || flash) return
-    if (pickedMovement === null || pickedDecade === null) return
+    if (!current || flash || movementResult !== 'correct') return
+    if (pickedDecade === null) return
 
-    const correctMovement = current.movement_fr
     const correctDecade = decadeOf(current.year)
-    const movementCorrect = pickedMovement === correctMovement
-
     let decadeKind: DecadeKind = 'miss'
     let decadePts = 0
     const diff = Math.abs(pickedDecade - correctDecade)
@@ -208,54 +253,41 @@ export default function PaintingGame({
       decadePts = DECADE_ADJACENT
     }
 
-    let base = (movementCorrect ? MOVEMENT_POINTS : 0) + decadePts
-
-    // Artiste rempli ET correct → double le score du tableau. Rempli mais
-    // faux → aucune pénalité.
+    let base = MOVEMENT_POINTS + decadePts
     const artistFilled = artistGuess.trim().length > 0
     const artistDoubled = artistFilled && artistMatches(artistGuess, current.artist)
     if (artistDoubled) base *= 2
 
-    // Bonus de série : uniquement si le mouvement est correct (un mouvement
-    // faux casse la série et ne reçoit aucun bonus). Calculé après le ×2.
-    const streakMult = movementCorrect ? 1 + STREAK_STEP * streak : 1
-    const total = Math.round(base * streakMult)
+    // Mouvement correct → la série progresse et son bonus s'applique (après ×2).
+    const total = Math.round(base * (1 + STREAK_STEP * streak))
+    const newStreak = streak + 1
 
     setScore((s) => s + total)
-
-    const newStreak = movementCorrect ? streak + 1 : 0
     setStreak(newStreak)
     if (newStreak > bestStreak) setBestStreak(newStreak)
     setSeen((n) => n + 1)
 
-    setFlash({
+    armFlash({
+      won: true,
       total,
-      movementCorrect,
       decadeKind,
       artistDoubled,
-      correctMovement,
+      streakAfter: newStreak,
+      correctMovement: current.movement_fr,
       correctDecade,
       artist: current.artist,
       year: current.year,
       title: current.title,
     })
-
-    flashTimer.current = setTimeout(() => {
-      flashTimer.current = null
-      drawNext()
-    }, FLASH_MS)
   }
 
   function skip() {
     if (!current || flash) return
-    // Passe sans aucun point ET casse la série, comme un mouvement faux.
     setStreak(0)
     setSeen((n) => n + 1)
     drawNext()
   }
 
-  // Image cassée : on remplace silencieusement le tableau (incident technique,
-  // ni point, ni pénalité, ni comptage).
   function onImgError() {
     setImgBroken(true)
     if (!flash) drawNext()
@@ -301,19 +333,13 @@ export default function PaintingGame({
           <h1 className="text-4xl sm:text-5xl font-serif text-[#f3ecd8] mb-6">
             Devine le mouvement
           </h1>
-          <p className="text-[#a8a290] leading-relaxed mb-6">
-            Un flux continu de tableaux pendant 3 minutes. Pour chacun, choisis
-            le <span className="text-[#e8e2d0]">mouvement</span>, fais défiler la
-            roue jusqu&apos;à la <span className="text-[#e8e2d0]">décennie</span>,
-            et si tu peux nomme l&apos;
-            <span className="text-[#e8e2d0]">artiste</span> (facultatif, il
-            double tes points).
+          <p className="text-[#a8a290] leading-relaxed mb-8">
+            Un flux de tableaux pendant 3 minutes. Reconnais le{' '}
+            <span className="text-[#e8e2d0]">mouvement</span>, situe la{' '}
+            <span className="text-[#e8e2d0]">décennie</span>, et nomme
+            l&apos;<span className="text-[#e8e2d0]">artiste</span> si tu peux.
+            Apprends à voir, pas à mémoriser.
           </p>
-          <ul className="text-[#6f6a5c] text-xs space-y-1 mb-8">
-            <li>Mouvement +100 · décennie exacte +50 · décennie voisine +25</li>
-            <li>Artiste correct ×2 · série de mouvements +10 % par cran</li>
-            <li>{movements.length} mouvements en jeu · {paintings.length} œuvres</li>
-          </ul>
           <div className="flex items-center justify-center gap-3">
             <button
               onClick={start}
@@ -339,10 +365,12 @@ export default function PaintingGame({
     return (
       <Shell>
         <div className="text-center max-w-md">
-          <p className="text-[#c9a84a] tracking-[0.3em] text-xs uppercase mb-4">
+          <p className="text-[#c9a84a] tracking-[0.3em] text-xs uppercase mb-3">
             Temps écoulé
           </p>
-          <p className="text-6xl font-serif text-[#f3ecd8] mb-6">{score}</p>
+          <p key={score} className="pg-pop text-7xl font-serif text-[#f3ecd8] mb-6">
+            {score}
+          </p>
           <div className="flex justify-center gap-8 text-sm mb-8">
             <div>
               <p className="text-[#f3ecd8] text-2xl">{seen}</p>
@@ -354,11 +382,8 @@ export default function PaintingGame({
             </div>
           </div>
 
-          {/* Enregistrement du score */}
           {saved ? (
-            <p className="text-emerald-300 text-sm mb-6">
-              Score enregistré ✓
-            </p>
+            <p className="text-emerald-300 text-sm mb-6">Score enregistré ✓</p>
           ) : (
             <div className="flex items-center gap-2 mb-3 max-w-xs mx-auto">
               <input
@@ -380,9 +405,7 @@ export default function PaintingGame({
               </button>
             </div>
           )}
-          {saveError && (
-            <p className="text-red-300 text-xs mb-4">{saveError}</p>
-          )}
+          {saveError && <p className="text-red-300 text-xs mb-4">{saveError}</p>}
 
           <div className="flex items-center justify-center gap-3 mt-2">
             <button
@@ -406,18 +429,24 @@ export default function PaintingGame({
 
   // ── Écran de jeu ───────────────────────────────────────────────────────
   if (!current) return null
-  const canValidate = pickedMovement !== null && pickedDecade !== null && !flash
+  const wheelsActive = movementResult === 'correct' && !flash
+  const canValidate = wheelsActive && pickedDecade !== null
   const totalSec = Math.ceil(remainingMs / 1000)
   const mm = Math.floor(totalSec / 60)
   const ss = String(totalSec % 60).padStart(2, '0')
   const lowTime = remainingMs <= 30000
+  const correctCentury = flash ? Math.floor(flash.year / 100) * 100 : null
+  const correctDigit = flash ? decadeOf(flash.year) - Math.floor(flash.year / 100) * 100 : null
 
   return (
     <main className="min-h-screen w-full bg-[#0d0d0c] flex flex-col">
       {/* Barre supérieure : score · chrono · série */}
       <header className="shrink-0 grid grid-cols-3 items-center px-5 sm:px-8 py-3 border-b border-[#26241c]">
-        <span className="text-[#c9a84a] text-sm sm:text-base justify-self-start">
-          {score} pts
+        <span
+          key={score}
+          className="pg-bump text-2xl sm:text-3xl font-bold text-[#c9a84a] justify-self-start tabular-nums"
+        >
+          {score}
         </span>
         <span
           className={`justify-self-center font-mono text-3xl sm:text-4xl tabular-nums ${
@@ -426,13 +455,34 @@ export default function PaintingGame({
         >
           {mm}:{ss}
         </span>
-        <span className="justify-self-end text-sm sm:text-base text-[#a8a290]">
-          {streak > 0 ? `🔥 série de ${streak}` : '—'}
+        <span
+          key={streak}
+          className={`justify-self-end ${streak > 0 ? 'pg-bump' : ''} inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm sm:text-base font-semibold ${
+            streak > 1
+              ? 'bg-orange-500/20 text-orange-300 ring-1 ring-orange-400/40'
+              : streak === 1
+                ? 'bg-[#c9a84a]/15 text-[#c9a84a]'
+                : 'text-[#5a5648]'
+          }`}
+        >
+          {streak > 0 ? (
+            <>
+              <span className="text-base sm:text-lg">🔥</span>
+              <span>série ×{streak}</span>
+              {streak > 1 && (
+                <span className="text-xs text-orange-200/80">
+                  +{Math.round(STREAK_STEP * streak * 100)}%
+                </span>
+              )}
+            </>
+          ) : (
+            <span>série 0</span>
+          )}
         </span>
       </header>
 
-      {/* Zone centrale paysage : mouvements · tableau · décennie/artiste */}
-      <div className="flex-1 min-h-0 grid lg:grid-cols-[230px_1fr_230px] gap-4 sm:gap-6 px-4 sm:px-8 py-5">
+      {/* Zone centrale paysage : mouvements · tableau · roues/artiste */}
+      <div className="flex-1 min-h-0 grid lg:grid-cols-[230px_1fr_250px] gap-4 sm:gap-6 px-4 sm:px-8 py-5">
         {/* Mouvements (gauche) */}
         <div className="flex flex-col justify-center gap-2 order-2 lg:order-1">
           <p className="text-[#a8a290] text-xs uppercase tracking-widest mb-1">
@@ -448,15 +498,17 @@ export default function PaintingGame({
               else if (isPicked)
                 cls = 'border-red-500/60 text-red-300 bg-red-500/10'
               else cls = 'border-[#2a2820] text-[#6f6a5c]'
+            } else if (movementResult === 'correct' && isPicked) {
+              cls = 'border-emerald-500/70 text-emerald-300 bg-emerald-500/10'
             } else if (isPicked) {
               cls = 'border-[#c9a84a] text-[#f3ecd8] bg-[#c9a84a]/10'
             }
             return (
               <button
                 key={m}
-                disabled={!!flash}
-                onClick={() => setPickedMovement(m)}
-                className={`px-3 py-2 rounded border text-sm text-left transition-colors ${cls}`}
+                disabled={movementResult !== 'pending' || !!flash}
+                onClick={() => pickMovement(m)}
+                className={`px-3 py-2 rounded border text-sm text-left transition-colors disabled:cursor-default ${cls}`}
               >
                 {m}
               </button>
@@ -488,60 +540,52 @@ export default function PaintingGame({
               />
             )}
           </div>
-
-          {/* Flash de révélation */}
-          {flash && (
-            <div className="absolute inset-x-0 bottom-0 flex justify-center pb-2">
-              <div className="rounded-md bg-[#13110d]/95 ring-1 ring-[#c9a84a]/30 px-4 py-2 text-center">
-                <p className="text-[#c9a84a] text-lg font-medium">
-                  +{flash.total}
-                  {flash.artistDoubled && (
-                    <span className="text-emerald-300 text-sm"> ×2 artiste</span>
-                  )}
-                </p>
-                <p className="text-[#e8e2d0] text-sm font-serif">
-                  « {flash.title} » — {flash.artist}, {flash.year}
-                </p>
-                <p className="text-[#6f6a5c] text-xs">
-                  {flash.correctMovement} ·{' '}
-                  {flash.decadeKind === 'exact'
-                    ? 'décennie exacte'
-                    : flash.decadeKind === 'adjacent'
-                      ? `voisine (${flash.correctDecade}s)`
-                      : `c'était ${flash.correctDecade}s`}
-                </p>
-              </div>
-            </div>
-          )}
         </div>
 
-        {/* Décennie + artiste (droite) */}
+        {/* Roues décennie + artiste (droite) */}
         <div className="flex flex-col justify-center gap-4 order-3">
           <div>
             <p className="text-[#a8a290] text-xs uppercase tracking-widest mb-1">
-              Décennie
+              Décennie{' '}
+              {!wheelsActive && !flash && (
+                <span className="text-[#5a5648] normal-case tracking-normal">
+                  · choisis d&apos;abord le mouvement
+                </span>
+              )}
             </p>
-            <DecadeWheel
-              decades={decades}
-              disabled={!!flash}
-              resetSignal={qi}
-              correctDecade={flash ? flash.correctDecade : null}
-              onChange={setPickedDecade}
-            />
+            <div className="flex gap-3 justify-center">
+              <Wheel
+                options={centuries}
+                format={(v) => `${v}`}
+                disabled={!wheelsActive}
+                resetSignal={qi}
+                correctValue={correctCentury}
+                onChange={setPickedCentury}
+              />
+              <Wheel
+                options={digits}
+                format={(v) => `${v}`}
+                disabled={!wheelsActive}
+                resetSignal={qi}
+                correctValue={correctDigit}
+                onChange={setPickedDigit}
+              />
+            </div>
+            <p className="text-center text-sm mt-1 text-[#a8a290]">
+              {pickedDecade !== null ? `${pickedDecade}s` : '— · —'}
+            </p>
           </div>
 
-          <div>
-            <input
-              value={artistGuess}
-              disabled={!!flash}
-              onChange={(e) => setArtistGuess(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && canValidate) validate()
-              }}
-              placeholder="Artiste (facultatif)…"
-              className="w-full px-3 py-2 rounded border border-[#3a362b] bg-[#13110d] text-[#e8e2d0] placeholder-[#5a5648] text-sm focus:border-[#c9a84a] focus:outline-none disabled:opacity-60"
-            />
-          </div>
+          <input
+            value={artistGuess}
+            disabled={!wheelsActive}
+            onChange={(e) => setArtistGuess(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && canValidate) validate()
+            }}
+            placeholder="Artiste (facultatif)…"
+            className="w-full px-3 py-2 rounded border border-[#3a362b] bg-[#13110d] text-[#e8e2d0] placeholder-[#5a5648] text-sm focus:border-[#c9a84a] focus:outline-none disabled:opacity-50"
+          />
         </div>
       </div>
 
@@ -562,36 +606,75 @@ export default function PaintingGame({
           Valider
         </button>
       </footer>
+
+      {/* Révélation centrale (arcade) */}
+      {flash && (
+        <button
+          onClick={advanceNow}
+          className="fixed inset-0 z-40 flex items-center justify-center bg-black/75 px-6 cursor-pointer"
+          aria-label="Continuer"
+        >
+          <div className="pg-reveal text-center max-w-md w-full bg-[#15130e] ring-1 ring-[#c9a84a]/40 rounded-2xl px-8 py-7 shadow-2xl">
+            <p
+              className={`text-sm tracking-[0.25em] uppercase mb-2 ${
+                flash.won ? 'text-emerald-300' : 'text-red-300'
+              }`}
+            >
+              {flash.won ? 'Bien vu' : 'Raté'}
+            </p>
+            <p
+              key={flash.total}
+              className={`pg-pop text-6xl font-bold mb-1 ${
+                flash.total > 0 ? 'text-[#ffd76a]' : 'text-[#6f6a5c]'
+              }`}
+            >
+              {flash.total > 0 ? `+${flash.total}` : '+0'}
+            </p>
+            {flash.artistDoubled && (
+              <p className="text-emerald-300 text-sm mb-1">artiste trouvé · ×2</p>
+            )}
+            {flash.won && flash.streakAfter > 1 && (
+              <p className="text-[#c9a84a] text-sm mb-1">🔥 série de {flash.streakAfter}</p>
+            )}
+            <p className="text-[#f3ecd8] font-serif text-xl mt-3">« {flash.title} »</p>
+            <p className="text-[#cfc9b6]">{flash.artist}</p>
+            <p className="text-[#c9a84a] mt-2 text-lg">
+              {flash.correctMovement} · {flash.correctDecade}s
+            </p>
+            <p className="text-[#5a5648] text-xs mt-4">Continuer →</p>
+          </div>
+        </button>
+      )}
     </main>
   )
 }
 
-// ── Roue de décennies (picker vertical avec inertie) ────────────────────────
-// Pilotée par un offset (px) plutôt que par le scroll natif, pour offrir une
-// vraie inertie au lâcher (fling avec friction) cohérente sur tous supports —
-// utile vu les ~80 décennies à parcourir.
+// ── Roue à inertie (picker vertical) ────────────────────────────────────────
+// Pilotée par un offset (px) : vraie inertie au lâcher (fling + friction),
+// cohérente sur souris/molette/tactile. Index 0 = placeholder « — ».
 const ITEM_H = 40
-const VISIBLE = 5 // nombre d'éléments visibles (impair pour avoir un centre)
-const FRICTION = 0.94 // décroissance de vitesse par frame (~16 ms)
-const MIN_V = 0.015 // seuil d'arrêt du fling (px/ms)
+const VISIBLE = 5
+const FRICTION = 0.94
+const MIN_V = 0.015
 
-function DecadeWheel({
-  decades,
+function Wheel({
+  options,
+  format,
   disabled,
   resetSignal,
-  correctDecade,
+  correctValue,
   onChange,
 }: {
-  decades: number[]
+  options: number[]
+  format: (v: number) => string
   disabled: boolean
   resetSignal: number
-  correctDecade: number | null
+  correctValue: number | null
   onChange: (v: number | null) => void
 }) {
   const containerH = ITEM_H * VISIBLE
   const pad = (containerH - ITEM_H) / 2
-  // index 0 = placeholder « — » (aucune sélection), puis une entrée par décennie.
-  const items = useMemo(() => [null as number | null, ...decades], [decades])
+  const items = useMemo(() => [null as number | null, ...options], [options])
   const maxOffset = (items.length - 1) * ITEM_H
 
   const [offset, setOffsetState] = useState(0)
@@ -623,10 +706,7 @@ function DecadeWheel({
   }, [])
 
   const snap = useCallback(() => {
-    const target = Math.max(
-      0,
-      Math.min(maxOffset, Math.round(offsetRef.current / ITEM_H) * ITEM_H)
-    )
+    const target = Math.max(0, Math.min(maxOffset, Math.round(offsetRef.current / ITEM_H) * ITEM_H))
     const animate = () => {
       const cur = offsetRef.current
       const diff = target - cur
@@ -665,7 +745,6 @@ function DecadeWheel({
     [maxOffset, report, setOff, snap]
   )
 
-  // Réinitialise sur le placeholder à chaque nouveau tableau, et nettoyage.
   useEffect(() => {
     cancelAnim()
     setOff(0)
@@ -702,7 +781,7 @@ function DecadeWheel({
       const a = s[0]
       const b = s[s.length - 1]
       const dt = b.t - a.t
-      if (dt > 0) v = -(b.y - a.y) / dt // glisser vers le haut => offset croissant
+      if (dt > 0) v = -(b.y - a.y) / dt
     }
     if (Math.abs(v) > 0.05) fling(v)
     else snap()
@@ -719,8 +798,7 @@ function DecadeWheel({
   const centeredIdx = Math.round(offset / ITEM_H)
 
   return (
-    <div className="relative select-none" style={{ height: containerH }}>
-      {/* Bandeau de sélection au centre */}
+    <div className="relative select-none w-20" style={{ height: containerH }}>
       <div
         className="pointer-events-none absolute inset-x-0 z-10 border-y border-[#c9a84a]/40 bg-[#c9a84a]/5"
         style={{ top: pad, height: ITEM_H }}
@@ -731,17 +809,16 @@ function DecadeWheel({
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
         onWheel={onWheel}
-        className={`h-full overflow-hidden ${
-          disabled ? 'opacity-70' : 'cursor-grab active:cursor-grabbing'
+        className={`h-full overflow-hidden rounded ${
+          disabled ? 'opacity-40' : 'cursor-grab active:cursor-grabbing'
         }`}
         style={{ touchAction: 'none' }}
       >
         <div style={{ transform: `translateY(${pad - offset}px)` }}>
           {items.map((d, i) => {
             const isCentered = i === centeredIdx
-            const isCorrect = correctDecade !== null && d === correctDecade
-            const isWrongPick =
-              correctDecade !== null && isCentered && d !== correctDecade
+            const isCorrect = correctValue !== null && d === correctValue
+            const isWrongPick = correctValue !== null && isCentered && d !== correctValue
             let cls = 'text-[#5a5648]'
             if (isCorrect) cls = 'text-emerald-300'
             else if (isWrongPick) cls = 'text-red-300'
@@ -754,7 +831,7 @@ function DecadeWheel({
                 }`}
                 style={{ height: ITEM_H }}
               >
-                {d === null ? '—' : `${d}s`}
+                {d === null ? '—' : format(d)}
               </div>
             )
           })}
