@@ -171,6 +171,10 @@ async function run() {
 
       const title = b.itemLabel?.value?.trim();
       if (!title) continue;
+      // Quand l'item n'a pas de label fr/en, le service wikibase:label
+      // retombe sur le QID lui-même (ex: "Q11953956") -> titre inexploitable
+      // pour un quiz, on rejette ces lignes à la source.
+      if (/^Q[0-9]+$/.test(title)) continue;
 
       const year = extractYear(b.inception?.value);
       if (!year) continue;
