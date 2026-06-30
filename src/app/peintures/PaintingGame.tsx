@@ -6,6 +6,8 @@
 // roue à défilement (obligatoire), et l'artiste (facultatif). Le but est
 // d'éduquer l'œil à reconnaître style et époque, pas de mémoriser des titres.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import Leaderboard from './Leaderboard'
 import type { Painting } from './page'
 
 // ── Règles du jeu ───────────────────────────────────────────────────────────
@@ -98,6 +100,13 @@ export default function PaintingGame({
   const [seen, setSeen] = useState(0) // tableaux validés ou passés
   const [flash, setFlash] = useState<Flash | null>(null)
 
+  // Classement.
+  const [showBoard, setShowBoard] = useState(false)
+  const [pseudo, setPseudo] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+
   // Chrono : on mémorise l'instant de fin et on rafraîchit l'affichage.
   const endRef = useRef<number>(0)
   const [remainingMs, setRemainingMs] = useState(GAME_SECONDS * 1000)
@@ -165,6 +174,9 @@ export default function PaintingGame({
     setStreak(0)
     setBestStreak(0)
     setSeen(0)
+    setSaved(false)
+    setSaveError(null)
+    setPseudo('')
     resetTurn()
     endRef.current = Date.now() + GAME_SECONDS * 1000
     setRemainingMs(GAME_SECONDS * 1000)
@@ -249,6 +261,23 @@ export default function PaintingGame({
     if (!flash) drawNext()
   }
 
+  async function saveScore() {
+    const name = pseudo.trim().slice(0, 20)
+    if (!name || saving || saved) return
+    setSaving(true)
+    setSaveError(null)
+    const supabase = createClient()
+    const { error } = await supabase.from('leaderboard').insert({
+      pseudo: name,
+      score,
+      best_streak: bestStreak,
+      paintings_seen: seen,
+    })
+    setSaving(false)
+    if (error) setSaveError(error.message || "Échec de l'enregistrement")
+    else setSaved(true)
+  }
+
   // ── Données insuffisantes ──────────────────────────────────────────────
   if (paintings.length === 0) {
     return (
@@ -285,13 +314,22 @@ export default function PaintingGame({
             <li>Artiste correct ×2 · série de mouvements +10 % par cran</li>
             <li>{movements.length} mouvements en jeu · {paintings.length} œuvres</li>
           </ul>
-          <button
-            onClick={start}
-            className="px-8 py-3 rounded-full bg-[#c9a84a] text-[#1a1813] font-medium hover:bg-[#dcbb5a] transition-colors"
-          >
-            Commencer
-          </button>
+          <div className="flex items-center justify-center gap-3">
+            <button
+              onClick={start}
+              className="px-8 py-3 rounded-full bg-[#c9a84a] text-[#1a1813] font-medium hover:bg-[#dcbb5a] transition-colors"
+            >
+              Commencer
+            </button>
+            <button
+              onClick={() => setShowBoard(true)}
+              className="px-6 py-3 rounded-full border border-[#3a362b] text-[#a8a290] hover:text-[#e8e2d0] hover:border-[#6f6a5c] transition-colors"
+            >
+              Classement
+            </button>
+          </div>
         </div>
+        {showBoard && <Leaderboard onClose={() => setShowBoard(false)} />}
       </Shell>
     )
   }
@@ -315,13 +353,53 @@ export default function PaintingGame({
               <p className="text-[#6f6a5c]">meilleure série</p>
             </div>
           </div>
-          <button
-            onClick={start}
-            className="px-8 py-3 rounded-full bg-[#c9a84a] text-[#1a1813] font-medium hover:bg-[#dcbb5a] transition-colors"
-          >
-            Rejouer
-          </button>
+
+          {/* Enregistrement du score */}
+          {saved ? (
+            <p className="text-emerald-300 text-sm mb-6">
+              Score enregistré ✓
+            </p>
+          ) : (
+            <div className="flex items-center gap-2 mb-3 max-w-xs mx-auto">
+              <input
+                value={pseudo}
+                maxLength={20}
+                onChange={(e) => setPseudo(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') saveScore()
+                }}
+                placeholder="Ton pseudo…"
+                className="flex-1 min-w-0 px-3 py-2 rounded border border-[#3a362b] bg-[#13110d] text-[#e8e2d0] placeholder-[#5a5648] text-sm focus:border-[#c9a84a] focus:outline-none"
+              />
+              <button
+                onClick={saveScore}
+                disabled={!pseudo.trim() || saving}
+                className="shrink-0 px-4 py-2 rounded bg-[#c9a84a] text-[#1a1813] text-sm font-medium hover:bg-[#dcbb5a] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                {saving ? '…' : 'Enregistrer'}
+              </button>
+            </div>
+          )}
+          {saveError && (
+            <p className="text-red-300 text-xs mb-4">{saveError}</p>
+          )}
+
+          <div className="flex items-center justify-center gap-3 mt-2">
+            <button
+              onClick={start}
+              className="px-8 py-3 rounded-full bg-[#c9a84a] text-[#1a1813] font-medium hover:bg-[#dcbb5a] transition-colors"
+            >
+              Rejouer
+            </button>
+            <button
+              onClick={() => setShowBoard(true)}
+              className="px-6 py-3 rounded-full border border-[#3a362b] text-[#a8a290] hover:text-[#e8e2d0] hover:border-[#6f6a5c] transition-colors"
+            >
+              Classement
+            </button>
+          </div>
         </div>
+        {showBoard && <Leaderboard onClose={() => setShowBoard(false)} />}
       </Shell>
     )
   }
@@ -445,7 +523,6 @@ export default function PaintingGame({
             </p>
             <DecadeWheel
               decades={decades}
-              value={pickedDecade}
               disabled={!!flash}
               resetSignal={qi}
               correctDecade={flash ? flash.correctDecade : null}
@@ -489,88 +566,199 @@ export default function PaintingGame({
   )
 }
 
-// ── Roue de décennies (picker à défilement vertical, façon iOS) ─────────────
+// ── Roue de décennies (picker vertical avec inertie) ────────────────────────
+// Pilotée par un offset (px) plutôt que par le scroll natif, pour offrir une
+// vraie inertie au lâcher (fling avec friction) cohérente sur tous supports —
+// utile vu les ~80 décennies à parcourir.
 const ITEM_H = 40
 const VISIBLE = 5 // nombre d'éléments visibles (impair pour avoir un centre)
+const FRICTION = 0.94 // décroissance de vitesse par frame (~16 ms)
+const MIN_V = 0.015 // seuil d'arrêt du fling (px/ms)
 
 function DecadeWheel({
   decades,
-  value,
   disabled,
   resetSignal,
   correctDecade,
   onChange,
 }: {
   decades: number[]
-  value: number | null
   disabled: boolean
   resetSignal: number
   correctDecade: number | null
   onChange: (v: number | null) => void
 }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [centered, setCentered] = useState(0) // 0 = placeholder « — »
   const containerH = ITEM_H * VISIBLE
   const pad = (containerH - ITEM_H) / 2
-  // index 0 = placeholder (aucune sélection), puis une entrée par décennie.
+  // index 0 = placeholder « — » (aucune sélection), puis une entrée par décennie.
   const items = useMemo(() => [null as number | null, ...decades], [decades])
+  const maxOffset = (items.length - 1) * ITEM_H
 
-  // Réinitialise sur placeholder à chaque nouveau tableau.
+  const [offset, setOffsetState] = useState(0)
+  const offsetRef = useRef(0)
+  const rafRef = useRef<number | null>(null)
+  const dragRef = useRef<{ startY: number; startOffset: number; samples: { t: number; y: number }[] } | null>(null)
+  const wheelTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const setOff = useCallback(
+    (v: number) => {
+      const clamped = Math.max(0, Math.min(maxOffset, v))
+      offsetRef.current = clamped
+      setOffsetState(clamped)
+    },
+    [maxOffset]
+  )
+
+  const report = useCallback(
+    (o: number) => {
+      const idx = Math.round(o / ITEM_H)
+      onChange(idx <= 0 ? null : items[idx] ?? null)
+    },
+    [items, onChange]
+  )
+
+  const cancelAnim = useCallback(() => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current)
+    rafRef.current = null
+  }, [])
+
+  const snap = useCallback(() => {
+    const target = Math.max(
+      0,
+      Math.min(maxOffset, Math.round(offsetRef.current / ITEM_H) * ITEM_H)
+    )
+    const animate = () => {
+      const cur = offsetRef.current
+      const diff = target - cur
+      if (Math.abs(diff) < 0.5) {
+        setOff(target)
+        report(target)
+        rafRef.current = null
+        return
+      }
+      setOff(cur + diff * 0.25)
+      rafRef.current = requestAnimationFrame(animate)
+    }
+    rafRef.current = requestAnimationFrame(animate)
+  }, [maxOffset, report, setOff])
+
+  const fling = useCallback(
+    (v0: number) => {
+      let v = v0
+      let last = performance.now()
+      const step = (now: number) => {
+        const dt = now - last
+        last = now
+        v *= Math.pow(FRICTION, dt / 16)
+        const next = offsetRef.current + v * dt
+        if (Math.abs(v) < MIN_V || next <= 0 || next >= maxOffset) {
+          setOff(next)
+          snap()
+          return
+        }
+        setOff(next)
+        report(offsetRef.current)
+        rafRef.current = requestAnimationFrame(step)
+      }
+      rafRef.current = requestAnimationFrame(step)
+    },
+    [maxOffset, report, setOff, snap]
+  )
+
+  // Réinitialise sur le placeholder à chaque nouveau tableau, et nettoyage.
   useEffect(() => {
-    const el = ref.current
-    if (el) el.scrollTop = 0
-    setCentered(0)
+    cancelAnim()
+    setOff(0)
     onChange(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetSignal])
+  useEffect(() => () => cancelAnim(), [cancelAnim])
 
-  function handleScroll() {
-    const el = ref.current
-    if (!el) return
-    const idx = Math.max(0, Math.min(items.length - 1, Math.round(el.scrollTop / ITEM_H)))
-    if (idx !== centered) {
-      setCentered(idx)
-      onChange(idx === 0 ? null : items[idx])
+  function onPointerDown(e: React.PointerEvent) {
+    if (disabled) return
+    cancelAnim()
+    e.currentTarget.setPointerCapture?.(e.pointerId)
+    dragRef.current = {
+      startY: e.clientY,
+      startOffset: offsetRef.current,
+      samples: [{ t: performance.now(), y: e.clientY }],
     }
   }
+  function onPointerMove(e: React.PointerEvent) {
+    const d = dragRef.current
+    if (!d) return
+    setOff(d.startOffset - (e.clientY - d.startY))
+    d.samples.push({ t: performance.now(), y: e.clientY })
+    if (d.samples.length > 5) d.samples.shift()
+    report(offsetRef.current)
+  }
+  function onPointerUp() {
+    const d = dragRef.current
+    if (!d) return
+    dragRef.current = null
+    const s = d.samples
+    let v = 0
+    if (s.length >= 2) {
+      const a = s[0]
+      const b = s[s.length - 1]
+      const dt = b.t - a.t
+      if (dt > 0) v = -(b.y - a.y) / dt // glisser vers le haut => offset croissant
+    }
+    if (Math.abs(v) > 0.05) fling(v)
+    else snap()
+  }
+  function onWheel(e: React.WheelEvent) {
+    if (disabled) return
+    cancelAnim()
+    setOff(offsetRef.current + e.deltaY)
+    report(offsetRef.current)
+    if (wheelTimer.current) clearTimeout(wheelTimer.current)
+    wheelTimer.current = setTimeout(snap, 120)
+  }
+
+  const centeredIdx = Math.round(offset / ITEM_H)
 
   return (
-    <div className="relative" style={{ height: containerH }}>
+    <div className="relative select-none" style={{ height: containerH }}>
       {/* Bandeau de sélection au centre */}
       <div
         className="pointer-events-none absolute inset-x-0 z-10 border-y border-[#c9a84a]/40 bg-[#c9a84a]/5"
         style={{ top: pad, height: ITEM_H }}
       />
       <div
-        ref={ref}
-        onScroll={handleScroll}
-        className={`h-full overflow-y-auto snap-y snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${
-          disabled ? 'pointer-events-none opacity-70' : ''
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        onWheel={onWheel}
+        className={`h-full overflow-hidden ${
+          disabled ? 'opacity-70' : 'cursor-grab active:cursor-grabbing'
         }`}
+        style={{ touchAction: 'none' }}
       >
-        <div style={{ height: pad }} />
-        {items.map((d, i) => {
-          const isCentered = i === centered
-          const isCorrect = correctDecade !== null && d === correctDecade
-          const isWrongPick =
-            correctDecade !== null && isCentered && d !== correctDecade
-          let cls = 'text-[#5a5648]'
-          if (isCorrect) cls = 'text-emerald-300'
-          else if (isWrongPick) cls = 'text-red-300'
-          else if (isCentered) cls = 'text-[#f3ecd8]'
-          return (
-            <div
-              key={i}
-              className={`snap-center flex items-center justify-center font-mono tabular-nums transition-colors ${cls} ${
-                isCentered ? 'text-lg' : 'text-sm'
-              }`}
-              style={{ height: ITEM_H }}
-            >
-              {d === null ? '—' : `${d}s`}
-            </div>
-          )
-        })}
-        <div style={{ height: pad }} />
+        <div style={{ transform: `translateY(${pad - offset}px)` }}>
+          {items.map((d, i) => {
+            const isCentered = i === centeredIdx
+            const isCorrect = correctDecade !== null && d === correctDecade
+            const isWrongPick =
+              correctDecade !== null && isCentered && d !== correctDecade
+            let cls = 'text-[#5a5648]'
+            if (isCorrect) cls = 'text-emerald-300'
+            else if (isWrongPick) cls = 'text-red-300'
+            else if (isCentered) cls = 'text-[#f3ecd8]'
+            return (
+              <div
+                key={i}
+                className={`flex items-center justify-center font-mono tabular-nums ${cls} ${
+                  isCentered ? 'text-lg' : 'text-sm'
+                }`}
+                style={{ height: ITEM_H }}
+              >
+                {d === null ? '—' : `${d}s`}
+              </div>
+            )
+          })}
+        </div>
       </div>
     </div>
   )
