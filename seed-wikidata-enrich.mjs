@@ -60,6 +60,7 @@ const MOVEMENTS = [
   { qid: "Q207445", fr: "De Stijl", expectedLabelContains: ["de stijl", "neoplastic"] },
   { qid: "Q131221", fr: "Futurisme", expectedLabelContains: ["futuris"] },
   { qid: "Q1474884", fr: "Renaissance", expectedLabelContains: ["renaissance"] },
+  { qid: "Q14378", fr: "Néoclassicisme", expectedLabelContains: ["neoclassicism", "néoclassicisme"] },
 ];
 
 const DELAY_MS = 1000;
